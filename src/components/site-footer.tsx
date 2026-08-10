@@ -15,7 +15,7 @@ export function SiteFooter({
 }) {
   return (
     <footer className="mt-auto bg-white">
-      <div className="mx-auto w-full max-w-5xl px-4 pt-10 pb-28 sm:px-6 sm:pt-12 sm:pb-12">
+      <div className="mx-auto w-full max-w-5xl px-4 pt-10 pb-28 sm:px-6 sm:pt-12 lg:pb-12">
         <div className="grid gap-8 sm:grid-cols-3">
           <div className="flex flex-col items-start gap-3">
             <Link

@@ -22,7 +22,7 @@ export function Cta({
   className,
 }: CtaProps) {
   const base =
-    "inline-flex items-center justify-center rounded-full font-semibold transition-colors duration-200 active:translate-y-px";
+    "inline-flex items-center justify-center rounded-full font-semibold whitespace-nowrap transition-colors duration-200 active:translate-y-px";
   const sizes = {
     md: "px-5 py-2.5 text-sm",
     lg: "px-7 py-3.5 text-[15px]",

@@ -35,6 +35,20 @@
   --shadow-pill: 0 6px 16px -10px rgba(120, 20, 70, 0.35);
 
   --animate-marquee: marquee 42s linear infinite;
+  --animate-step: step-in 0.3s ease-out both;
+  --animate-mic: mic-pulse 1.6s ease-out infinite;
+  --animate-bar: bar 0.9s ease-in-out infinite;
+}
+
+/* Индикатор записи голоса. */
+@keyframes bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 @keyframes marquee {
@@ -43,6 +57,30 @@
   }
   to {
     transform: translateX(-50%);
+  }
+}
+
+/* Смена шага теста: короткое появление снизу, без тяжёлых эффектов. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(248, 67, 143, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(248, 67, 143, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(248, 67, 143, 0);
   }
 }
 

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { notFound } from "next/navigation";
-import { LocaleSwitcher } from "@/components/locale-switcher";
-import { Cta, Tag } from "@/components/ui";
+import { TestFlow } from "@/components/test/test-flow";
 import { isLocale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionary";
 
@@ -14,34 +14,55 @@ export async function generateMetadata({
   const dict = await getDictionary(locale);
 
   return {
-    title: dict.testPage.metaTitle,
-    description: dict.testPage.metaDescription,
+    title: dict.testForm.metaTitle,
+    description: dict.testForm.metaDescription,
   };
 }
 
-/** Заглушка: сюда позже встанет сам тест. */
-export default async function TestPage({ params }: PageProps<"/[locale]/test">) {
+export default async function TestPage({
+  params,
+}: PageProps<"/[locale]/test">) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
 
   const dict = await getDictionary(locale);
-  const t = dict.testPage;
+  const t = dict.testForm;
 
   return (
-    <main className="flex flex-1 items-center justify-center px-4 py-20 sm:px-6">
-      <div className="rounded-block shadow-block-lg mx-auto flex w-full max-w-md flex-col items-center gap-4 bg-white p-6 text-center sm:p-10">
-        <Tag>{t.tag}</Tag>
-        <h1 className="text-[25px] leading-[1.15] font-extrabold sm:text-3xl">
-          {t.titleLead} <span className="text-accent">{t.titleAccent}</span>
-        </h1>
-        <p className="text-sm leading-relaxed text-ink-soft">{t.text}</p>
-        <Cta href={`/${locale}`}>{dict.cta.toHome}</Cta>
-        <LocaleSwitcher
+    <div className="flex min-h-dvh flex-col">
+      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-4 sm:px-6">
+        <TestFlow
+          formTexts={t}
+          quizTexts={dict.quiz}
+          switcherLabel={dict.switcher.label}
           locale={locale}
-          path="/test"
-          label={dict.switcher.label}
+          header={
+            // Картинка лежит на заднем плане и заходит под текст.
+            <div className="relative isolate">
+              <Image
+                src="/couple.png"
+                alt=""
+                aria-hidden
+                width={1024}
+                height={1024}
+                priority
+                sizes="(max-width: 640px) 42vw, 220px"
+                className="pointer-events-none absolute top-0 right-0 -z-10 w-32 max-w-none opacity-90 select-none sm:-top-3 sm:w-44 lg:w-52"
+              />
+
+              <h1 className="max-w-[62%] text-[26px] leading-[1.08] font-extrabold sm:max-w-[64%] sm:text-[28px] lg:text-[32px]">
+                {t.titleLead}{" "}
+                <span className="text-accent">{t.titleAccent}</span>{" "}
+                {t.titleTail}
+              </h1>
+
+              <p className="mt-2 max-w-[92%] text-[13px] leading-snug text-ink-soft sm:max-w-[64%] sm:text-sm">
+                {t.subtitle}
+              </p>
+            </div>
+          }
         />
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

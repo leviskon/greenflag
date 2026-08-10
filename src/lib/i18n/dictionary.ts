@@ -1,9 +1,7 @@
-import "server-only";
 import type { Locale } from "./config";
-import { ru } from "./ru";
+import { ru, type Dictionary } from "./ru";
 
-/** Форма словаря задаётся русской версией — остальные языки обязаны её повторить. */
-export type Dictionary = typeof ru;
+export type { Dictionary };
 
 const dictionaries: Record<Locale, () => Promise<Dictionary>> = {
   ru: async () => ru,
