@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Tag } from "@/components/ui";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
@@ -98,12 +98,15 @@ export function TestFlow({
     // Язык фиксируется здесь: дальше его сменить нельзя.
     const newState = stored ? withProfile(stored, profile) : createState(profile, locale);
     saveState(newState);
+    setStored(newState); // Обновляем локальный стейт сразу
     setStep({ kind: "question", index: 0 });
   }
 
   function persist(index: number, answer: { she: string; he: string }) {
     if (!stored) return;
-    saveState(withAnswer(stored, questions[index].id, questions[index].text, answer));
+    const newState = withAnswer(stored, questions[index].id, questions[index].text, answer);
+    saveState(newState);
+    setStored(newState); // Обновляем локальный стейт сразу
   }
 
   function handleNext(index: number, answer: { she: string; he: string }) {

@@ -202,6 +202,26 @@ export function QuestionStep({
         {question.text}
       </h1>
 
+      {/* Картинки для вопросов */}
+      {question.id === "peace" && (
+        <div className="shrink-0 flex justify-center py-2">
+          <img 
+            src="/sorry.png" 
+            alt="" 
+            className="max-w-[120px] sm:max-w-[150px]"
+          />
+        </div>
+      )}
+      {question.id === "critique" && (
+        <div className="shrink-0 flex justify-center py-2">
+          <img 
+            src="/critique.png" 
+            alt="" 
+            className="max-w-[120px] sm:max-w-[150px]"
+          />
+        </div>
+      )}
+
       {/* Блоки ответов не тянутся на весь экран: высота ограничена,
           лишнее место распределяется вокруг. */}
       <div className="grid max-h-[40vh] min-h-36 flex-1 grid-cols-2 gap-2 sm:max-h-64">
