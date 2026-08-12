@@ -87,9 +87,9 @@ export function ProfileStep({
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-1 flex-col">
       <div className="flex flex-1 flex-col justify-center gap-4 sm:gap-3">
-        {header}
+        <div key="header-wrapper">{header}</div>
 
-        <div className="rounded-block shadow-block bg-white p-3 sm:p-4">
+        <div key="form-card" className="rounded-block shadow-block bg-white p-3 sm:p-4">
           <h2 className="text-center text-[13px] font-extrabold sm:text-[15px]">
             {texts.cardTitle}
           </h2>

@@ -51,9 +51,7 @@ export default async function TestPage({
               />
 
               <h1 className="max-w-[62%] text-[26px] leading-[1.08] font-extrabold sm:max-w-[64%] sm:text-[28px] lg:text-[32px]">
-                {t.titleLead}{" "}
-                <span className="text-accent">{t.titleAccent}</span>{" "}
-                {t.titleTail}
+                {t.titleLead} <span className="text-accent">{t.titleAccent}</span> {t.titleTail}
               </h1>
 
               <p className="mt-2 max-w-[92%] text-[13px] leading-snug text-ink-soft sm:max-w-[64%] sm:text-sm">

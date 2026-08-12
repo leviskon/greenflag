@@ -10,7 +10,7 @@ import type { AnswerPair, Participant } from "@/lib/storage";
 import { VoiceAnswer } from "./voice-answer";
 
 type Texts = Dictionary["quiz"];
-type Question = Texts["questions"][number];
+type Question = Exclude<Texts["questions"][number], { type: "multiple-choice" }>;
 type MicError = "unsupported" | "insecure" | "denied" | "failed";
 
 /**
@@ -216,6 +216,33 @@ export function QuestionStep({
         <div className="shrink-0 flex justify-center py-2">
           <img 
             src="/critique.png" 
+            alt="" 
+            className="max-w-[120px] sm:max-w-[150px]"
+          />
+        </div>
+      )}
+      {question.id === "lastday" && (
+        <div className="shrink-0 flex justify-center py-2">
+          <img 
+            src="/lastday.png" 
+            alt="" 
+            className="max-w-[120px] sm:max-w-[150px]"
+          />
+        </div>
+      )}
+      {question.id === "disagree" && (
+        <div className="shrink-0 flex justify-center py-2">
+          <img 
+            src="/5.png" 
+            alt="" 
+            className="max-w-[120px] sm:max-w-[150px]"
+          />
+        </div>
+      )}
+      {question.id === "change-behavior" && (
+        <div className="shrink-0 flex justify-center py-2">
+          <img 
+            src="/6.png" 
             alt="" 
             className="max-w-[120px] sm:max-w-[150px]"
           />

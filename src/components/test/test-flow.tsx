@@ -21,6 +21,7 @@ import {
 } from "@/lib/storage";
 import { ProfileStep } from "./profile-step";
 import { QuestionStep } from "./question-step";
+import { ChoiceStep } from "./choice-step";
 import { TestHeader } from "./test-header";
 
 type Step =
@@ -146,6 +147,7 @@ export function TestFlow({
         {languageControl}
         <div key="profile" className="animate-step flex flex-1 flex-col">
           <ProfileStep
+            key="profile-form"
             texts={formTexts}
             header={header}
             initial={stored?.profile ?? EMPTY_PROFILE}
@@ -220,6 +222,7 @@ export function TestFlow({
   const index = Math.min(Math.max(active.index, 0), total - 1);
   const question = questions[index];
   const saved = stored?.answers[question.id];
+  const isMultipleChoice = "type" in question && question.type === "multiple-choice";
 
   return (
     <>
@@ -229,19 +232,33 @@ export function TestFlow({
         key={`q-${question.id}`}
         className="animate-step flex min-h-0 flex-1 flex-col"
       >
-        <QuestionStep
-          texts={quizTexts}
-          locale={locale}
-          question={question}
-          index={index}
-          total={total}
-          initial={{ she: saved?.she ?? "", he: saved?.he ?? "" }}
-          // Распознавание речи работает только по-русски.
-          voiceEnabled={locale === "ru"}
-          backLabel={index === 0 ? quizTexts.editProfile : quizTexts.back}
-          onSubmit={(answer) => handleNext(index, answer)}
-          onBack={(answer) => handleBack(index, answer)}
-        />
+        {isMultipleChoice ? (
+          <ChoiceStep
+            texts={quizTexts}
+            locale={locale}
+            question={question as Extract<typeof question, { type: "multiple-choice" }>}
+            index={index}
+            total={total}
+            initial={{ she: saved?.she ?? "", he: saved?.he ?? "" }}
+            backLabel={index === 0 ? quizTexts.editProfile : quizTexts.back}
+            onSubmit={(answer) => handleNext(index, answer)}
+            onBack={(answer) => handleBack(index, answer)}
+          />
+        ) : (
+          <QuestionStep
+            texts={quizTexts}
+            locale={locale}
+            question={question as Extract<typeof question, { text: string; exampleShe?: string }>}
+            index={index}
+            total={total}
+            initial={{ she: saved?.she ?? "", he: saved?.he ?? "" }}
+            // Распознавание речи работает только по-русски.
+            voiceEnabled={locale === "ru"}
+            backLabel={index === 0 ? quizTexts.editProfile : quizTexts.back}
+            onSubmit={(answer) => handleNext(index, answer)}
+            onBack={(answer) => handleBack(index, answer)}
+          />
+        )}
       </div>
     </>
   );
