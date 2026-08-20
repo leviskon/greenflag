@@ -1,16 +1,20 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import SpeechRecognition, {
   useSpeechRecognition,
 } from "react-speech-recognition";
+import { cn } from "@/components/ui";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
 import type { AnswerPair, Participant } from "@/lib/storage";
+import { StepFooter } from "./step-footer";
 import { VoiceAnswer } from "./voice-answer";
 
 type Texts = Dictionary["quiz"];
-type Question = Exclude<Texts["questions"][number], { type: "multiple-choice" }>;
+/** Обычный вопрос: у шагов с вариантами и шкалой есть поле type, здесь его нет. */
+type Question = Exclude<Texts["questions"][number], { type: string }>;
 type MicError = "unsupported" | "insecure" | "denied" | "failed";
 
 /**
@@ -20,6 +24,15 @@ type MicError = "unsupported" | "insecure" | "denied" | "failed";
 const RECOGNITION_LANG: Record<Locale, string> = {
   ru: "ru-RU",
   ky: "ru-RU",
+};
+
+/** Картинка к вопросу, если она есть. */
+const ILLUSTRATIONS: Record<string, string> = {
+  peace: "/sorry.png",
+  critique: "/critique.png",
+  lastday: "/lastday.png",
+  disagree: "/5.png",
+  "change-behavior": "/6.png",
 };
 
 export function QuestionStep({
@@ -164,6 +177,7 @@ export function QuestionStep({
   const answer = collect();
   const ready = Boolean(answer.she && answer.he);
   const isLast = index + 1 === total;
+  const illustration = ILLUSTRATIONS[question.id];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2.5">
@@ -198,60 +212,36 @@ export function QuestionStep({
         />
       </div>
 
-      <h1 className="shrink-0 text-center text-[15px] leading-snug font-extrabold sm:text-lg">
-        {question.text}
-      </h1>
+      {/* Вопрос с картинкой: текст слева, картинка справа — как на форме
+          данных пары. Без картинки вопрос остаётся по центру. */}
+      <div className="flex shrink-0 items-center gap-3">
+        <h1
+          className={cn(
+            "min-w-0 flex-1 text-base leading-snug font-extrabold sm:text-lg",
+            illustration ? "text-left" : "text-center",
+          )}
+        >
+          {question.text}
+        </h1>
 
-      {/* Картинки для вопросов */}
-      {question.id === "peace" && (
-        <div className="shrink-0 flex justify-center py-2">
-          <img 
-            src="/sorry.png" 
-            alt="" 
-            className="max-w-[120px] sm:max-w-[150px]"
+        {/* Через next/image, иначе телефон тянет исходные PNG
+            по 1–1,5 МБ и вкладка может перезагрузиться. */}
+        {illustration ? (
+          <Image
+            src={illustration}
+            alt=""
+            aria-hidden
+            width={1024}
+            height={1024}
+            sizes="(max-width: 640px) 128px, (max-width: 1024px) 176px, 208px"
+            className="h-auto w-32 shrink-0 sm:w-44 lg:w-52"
           />
-        </div>
-      )}
-      {question.id === "critique" && (
-        <div className="shrink-0 flex justify-center py-2">
-          <img 
-            src="/critique.png" 
-            alt="" 
-            className="max-w-[120px] sm:max-w-[150px]"
-          />
-        </div>
-      )}
-      {question.id === "lastday" && (
-        <div className="shrink-0 flex justify-center py-2">
-          <img 
-            src="/lastday.png" 
-            alt="" 
-            className="max-w-[120px] sm:max-w-[150px]"
-          />
-        </div>
-      )}
-      {question.id === "disagree" && (
-        <div className="shrink-0 flex justify-center py-2">
-          <img 
-            src="/5.png" 
-            alt="" 
-            className="max-w-[120px] sm:max-w-[150px]"
-          />
-        </div>
-      )}
-      {question.id === "change-behavior" && (
-        <div className="shrink-0 flex justify-center py-2">
-          <img 
-            src="/6.png" 
-            alt="" 
-            className="max-w-[120px] sm:max-w-[150px]"
-          />
-        </div>
-      )}
+        ) : null}
+      </div>
 
       {/* Блоки ответов не тянутся на весь экран: высота ограничена,
           лишнее место распределяется вокруг. */}
-      <div className="grid max-h-[40vh] min-h-36 flex-1 grid-cols-2 gap-2 sm:max-h-64">
+      <div className="grid max-h-[40dvh] min-h-24 flex-1 grid-cols-2 gap-2 sm:max-h-64">
         <VoiceAnswer
           side="she"
           title={texts.turnShe}
@@ -286,23 +276,17 @@ export function QuestionStep({
         />
       </div>
 
-      {/* Кнопка идёт сразу под блоками ответов. */}
-      <button
-        type="button"
-        onClick={async () => {
-          await leave();
-          onSubmit(collect());
-        }}
+      <StepFooter
+        label={isLast ? texts.finish : texts.next}
+        hint={texts.hint}
         disabled={!ready}
-        className="shadow-pill w-full shrink-0 rounded-full bg-pink-500 px-6 py-3 text-[15px] font-extrabold text-white transition-colors hover:bg-pink-600 active:translate-y-px disabled:bg-pink-200 disabled:shadow-none"
-      >
-        {isLast ? texts.finish : texts.next}
-      </button>
-
-      {/* Подсказка остаётся прижатой к низу экрана. */}
-      <p className="mt-auto shrink-0 pt-2 text-center text-[10px] leading-snug text-ink-muted sm:text-xs">
-        {texts.hint}
-      </p>
+        onClick={() => {
+          void (async () => {
+            await leave();
+            onSubmit(collect());
+          })();
+        }}
+      />
     </div>
   );
 }

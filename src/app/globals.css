@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-unbounded), var(--font-manrope), sans-serif;
+  --font-sans: var(--font-golos), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-geologica), var(--font-golos), sans-serif;
 
   /* Текст и фон: тёплая розоватая база */
   --color-ink: #2a1327;

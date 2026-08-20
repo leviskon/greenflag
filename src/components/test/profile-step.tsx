@@ -1,9 +1,13 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/components/ui";
 import type { Dictionary } from "@/lib/i18n/ru";
-import type { CoupleProfile } from "@/lib/storage";
+import {
+  readProfileDraft,
+  saveProfileDraft,
+  type CoupleProfile,
+} from "@/lib/storage";
 
 type Texts = Dictionary["testForm"];
 
@@ -20,6 +24,50 @@ type Errors = Partial<Record<keyof Fields, string>>;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+const FIELD_KEYS = [
+  "sheName",
+  "sheBirthday",
+  "heName",
+  "heBirthday",
+  "since",
+  "email",
+] as const;
+
+function toFields(profile: CoupleProfile): Fields {
+  return {
+    sheName: profile.she.name,
+    sheBirthday: profile.she.birthday,
+    heName: profile.he.name,
+    heBirthday: profile.he.birthday,
+    since: profile.since,
+    email: profile.email,
+  };
+}
+
+/** Что сейчас реально введено в поля формы. null — формы ещё нет в DOM. */
+function readDomFields(form: HTMLFormElement | null): Fields | null {
+  if (!form) return null;
+
+  const data = new FormData(form);
+  const fields = {} as Fields;
+
+  for (const key of FIELD_KEYS) {
+    const value = data.get(key);
+    fields[key] = typeof value === "string" ? value : "";
+  }
+
+  return fields;
+}
+
+function toProfile(fields: Fields): CoupleProfile {
+  return {
+    she: { name: fields.sheName.trim(), birthday: fields.sheBirthday },
+    he: { name: fields.heName.trim(), birthday: fields.heBirthday },
+    since: fields.since,
+    email: fields.email.trim(),
+  };
+}
+
 export function ProfileStep({
   texts,
   header,
@@ -33,19 +81,43 @@ export function ProfileStep({
   initial: CoupleProfile;
   onSubmit: (profile: CoupleProfile) => void;
 }) {
-  const [fields, setFields] = useState<Fields>(() => ({
-    sheName: initial.she.name,
-    sheBirthday: initial.she.birthday,
-    heName: initial.he.name,
-    heBirthday: initial.he.birthday,
-    since: initial.since,
-    email: initial.email,
-  }));
+  const [fields, setFields] = useState<Fields>(() => toFields(initial));
   const [errors, setErrors] = useState<Errors>({});
+  const formRef = useRef<HTMLFormElement>(null);
+
+  /**
+   * Страница отдаётся с сервера уже готовой, поэтому на телефоне в поля можно
+   * начать печатать раньше, чем загрузится и запустится JS: на медленной сети
+   * это десятки секунд. React о таком вводе не знает и при первом своём рендере
+   * затирает поля пустым состоянием. Поэтому после гидрации забираем то, что
+   * реально лежит в DOM, и подхватываем черновик прошлой попытки.
+   */
+  useEffect(() => {
+    const typed = readDomFields(formRef.current);
+    const draft = readProfileDraft();
+
+    if (!typed && !draft) return;
+
+    setFields((prev) => {
+      const fromDraft = draft ? toFields(draft) : null;
+      const next = { ...prev };
+
+      for (const key of FIELD_KEYS) {
+        if (typed && typed[key] !== "") next[key] = typed[key];
+        else if (next[key] === "" && fromDraft) next[key] = fromDraft[key];
+      }
+
+      return next;
+    });
+  }, []);
 
   function update<K extends keyof Fields>(key: K, value: string) {
-    setFields((prev) => ({ ...prev, [key]: value }));
+    const next = { ...fields, [key]: value };
+
+    setFields(next);
     setErrors((prev) => ({ ...prev, [key]: undefined }));
+    // Черновик переживает перезагрузку страницы: ничего вводить заново не нужно.
+    saveProfileDraft(toProfile(next));
   }
 
   function validate(values: Fields): Errors {
@@ -61,31 +133,52 @@ export function ProfileStep({
     return next;
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    event.stopPropagation();
+  function submit() {
+    // Источник правды — сами поля в DOM, а не состояние React: пользователь мог
+    // печатать до гидрации или браузер мог подставить автозаполнение.
+    const values = readDomFields(formRef.current) ?? fields;
 
-    const found = validate(fields);
+    setFields(values);
+
+    const found = validate(values);
     setErrors(found);
-    
-    if (Object.keys(found).length > 0) {
-      return;
-    }
+
+    if (Object.keys(found).length > 0) return;
 
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
 
-    onSubmit({
-      she: { name: fields.sheName.trim(), birthday: fields.sheBirthday },
-      he: { name: fields.heName.trim(), birthday: fields.heBirthday },
-      since: fields.since,
-      email: fields.email.trim(),
-    });
+    const profile = toProfile(values);
+    saveProfileDraft(profile);
+    onSubmit(profile);
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    // Своя отправка: браузеру форму отдавать нельзя, иначе он перезагрузит
+    // страницу и всё введённое пропадёт.
+    event.preventDefault();
+    event.stopPropagation();
+    submit();
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLFormElement>) {
+    // У формы нет кнопки submit, поэтому Enter обрабатываем сами.
+    if (event.key !== "Enter" || event.shiftKey) return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+
+    event.preventDefault();
+    submit();
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-1 flex-col">
+    <form
+      ref={formRef}
+      onSubmit={handleSubmit}
+      onKeyDown={handleKeyDown}
+      noValidate
+      className="flex flex-1 flex-col"
+    >
       <div className="flex flex-1 flex-col justify-center gap-4 sm:gap-3">
         <div key="header-wrapper">{header}</div>
 
@@ -102,6 +195,7 @@ export function ProfileStep({
               </legend>
               <div className="flex flex-col gap-2">
                 <Field
+                  name="sheName"
                   label={texts.nameLabel}
                   value={fields.sheName}
                   onChange={(v) => update("sheName", v)}
@@ -110,6 +204,7 @@ export function ProfileStep({
                   autoComplete="off"
                 />
                 <Field
+                  name="sheBirthday"
                   label={texts.birthdayLabel}
                   type="date"
                   value={fields.sheBirthday}
@@ -125,6 +220,7 @@ export function ProfileStep({
               </legend>
               <div className="flex flex-col gap-2">
                 <Field
+                  name="heName"
                   label={texts.nameLabel}
                   value={fields.heName}
                   onChange={(v) => update("heName", v)}
@@ -133,6 +229,7 @@ export function ProfileStep({
                   autoComplete="off"
                 />
                 <Field
+                  name="heBirthday"
                   label={texts.birthdayLabel}
                   type="date"
                   value={fields.heBirthday}
@@ -145,6 +242,7 @@ export function ProfileStep({
 
           <div className="mt-2 flex flex-col gap-2 sm:mt-2.5">
             <Field
+              name="since"
               label={texts.sinceLabel}
               hint={texts.sinceHint}
               type="month"
@@ -154,6 +252,7 @@ export function ProfileStep({
               tone="soft"
             />
             <Field
+              name="email"
               label={texts.emailLabel}
               hint={texts.emailHint}
               type="email"
@@ -170,8 +269,11 @@ export function ProfileStep({
       </div>
 
       <div className="mt-4 flex flex-col gap-2 sm:mt-3">
+        {/* Не submit: у формы не должно быть кнопки отправки, иначе браузер
+            может отправить её сам, ещё до того как заработает JS. */}
         <button
-          type="submit"
+          type="button"
+          onClick={submit}
           className="shadow-pill w-full rounded-full bg-pink-500 px-6 py-3 text-[15px] font-extrabold whitespace-nowrap text-white transition-colors hover:bg-pink-600 active:translate-y-px"
         >
           {texts.submit}
@@ -200,6 +302,7 @@ function LegalLink({ children }: { children: React.ReactNode }) {
 
 /** Лейбл внутри поля: компактнее и повторяет исходный макет. */
 function Field({
+  name,
   label,
   hint,
   value,
@@ -211,6 +314,8 @@ function Field({
   inputMode,
   tone = "plain",
 }: {
+  /** Совпадает с ключом в Fields: по нему читаем ввод до гидрации. */
+  name: keyof Fields;
   label: string;
   hint?: string;
   value: string;
@@ -246,6 +351,7 @@ function Field({
 
       <input
         id={id}
+        name={name}
         type={type}
         inputMode={inputMode}
         autoComplete={autoComplete}

@@ -4,6 +4,9 @@ import { isLocale, type Locale } from "@/lib/i18n/config";
 
 export const STORAGE_KEY = "greenflag.test.v3";
 
+/** Черновик первой формы: пишется на каждый ввод, до начала теста. */
+export const DRAFT_KEY = "greenflag.profile-draft.v1";
+
 /** Событие для useSyncExternalStore: localStorage сам о записи не сообщает. */
 const CHANGE_EVENT = "greenflag:test-state";
 
@@ -86,9 +89,31 @@ export function withAnswer(
   };
 }
 
-export function isAnswered(state: TestState, questionId: string): boolean {
+/**
+ * Ответ засчитан, только если заполнены обе стороны.
+ *
+ * У шкалы «или — или» ответ хранится как список значений через запятую — по
+ * одному на пару вариантов. Такой ответ бывает заполнен наполовину, поэтому
+ * через `slots` передаётся ожидаемое число значений: иначе недозаполненный
+ * вопрос считался бы пройденным и тест бы его пролистывал.
+ */
+export function isAnswered(
+  state: TestState,
+  questionId: string,
+  slots = 1,
+): boolean {
   const pair = state.answers[questionId];
-  return Boolean(pair?.she.trim() && pair?.he.trim());
+  if (!pair) return false;
+
+  return isFilled(pair.she, slots) && isFilled(pair.he, slots);
+}
+
+function isFilled(value: string, slots: number): boolean {
+  if (slots <= 1) return value.trim() !== "";
+
+  const parts = value.split(",");
+
+  return parts.length === slots && parts.every((part) => part.trim() !== "");
 }
 
 /** Готовый к отправке в ИИ вид: порядок вопросов и подписанные ответы. */
@@ -117,6 +142,59 @@ export function buildAiPayload(
       };
     }),
   };
+}
+
+function isProfile(value: unknown): value is CoupleProfile {
+  if (typeof value !== "object" || value === null) return false;
+
+  const profile = value as Partial<CoupleProfile>;
+
+  return (
+    typeof profile.since === "string" &&
+    typeof profile.email === "string" &&
+    typeof profile.she?.name === "string" &&
+    typeof profile.she?.birthday === "string" &&
+    typeof profile.he?.name === "string" &&
+    typeof profile.he?.birthday === "string"
+  );
+}
+
+/**
+ * Незаконченная форма пары. Нужна, чтобы обновление страницы (или её
+ * перезагрузка браузером на телефоне) не обнуляло уже введённые данные.
+ */
+export function readProfileDraft(): CoupleProfile | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+
+    const parsed: unknown = JSON.parse(raw);
+    return isProfile(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveProfileDraft(profile: CoupleProfile): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(profile));
+  } catch {
+    // Хранилище недоступно (приватный режим) — форма всё равно работает.
+  }
+}
+
+export function clearProfileDraft(): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Удалять нечего.
+  }
 }
 
 function isState(value: unknown): value is TestState {
@@ -150,14 +228,20 @@ export function parseState(raw: string | null): TestState | null {
   }
 }
 
+/**
+ * Резерв на случай, когда localStorage недоступен (приватный режим, запрет
+ * хранилища): тест хотя бы доходит до конца в рамках одной вкладки.
+ */
+let memorySnapshot = "";
+
 /** Снимок для клиента: строка JSON или "" если данных нет. */
 export function readRawState(): string {
   if (typeof window === "undefined") return "";
 
   try {
-    return window.localStorage.getItem(STORAGE_KEY) ?? "";
+    return window.localStorage.getItem(STORAGE_KEY) ?? memorySnapshot;
   } catch {
-    return "";
+    return memorySnapshot;
   }
 }
 
@@ -182,19 +266,30 @@ export function subscribeToState(onChange: () => void): () => void {
 export function saveState(state: TestState): boolean {
   if (typeof window === "undefined") return false;
 
+  const serialized = JSON.stringify({
+    ...state,
+    updatedAt: new Date().toISOString(),
+  });
+
+  memorySnapshot = serialized;
+  let saved = true;
+
   try {
-    const serialized = JSON.stringify({ ...state, updatedAt: new Date().toISOString() });
     window.localStorage.setItem(STORAGE_KEY, serialized);
-    window.dispatchEvent(new Event("greenflag:test-state"));
-    return true;
   } catch (error) {
+    saved = false;
     console.error("Failed to save state to localStorage:", error);
-    return false;
   }
+
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+
+  return saved;
 }
 
 export function clearState(): void {
   if (typeof window === "undefined") return;
+
+  memorySnapshot = "";
 
   try {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -202,5 +297,6 @@ export function clearState(): void {
     // Удалять нечего.
   }
 
-  window.dispatchEvent(new Event("greenflag:test-state"));
+  clearProfileDraft();
+  window.dispatchEvent(new Event(CHANGE_EVENT));
 }

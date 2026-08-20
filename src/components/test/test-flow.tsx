@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Tag } from "@/components/ui";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
@@ -13,7 +13,9 @@ import {
   isAnswered,
   parseState,
   readRawState,
+  readServerState,
   saveState,
+  subscribeToState,
   withAnswer,
   withProfile,
   type CoupleProfile,
@@ -22,12 +24,46 @@ import {
 import { ProfileStep } from "./profile-step";
 import { QuestionStep } from "./question-step";
 import { ChoiceStep } from "./choice-step";
+import { ScaleStep } from "./scale-step";
+import { VerdictStep } from "./verdict-step";
 import { TestHeader } from "./test-header";
 
 type Step =
   | { kind: "profile" }
   | { kind: "question"; index: number }
   | { kind: "done" };
+
+type Question = Dictionary["quiz"]["questions"][number];
+
+/** У вопросов с type свой шаг; у остальных — обычные поля ответов. */
+function isChoice(
+  question: Question,
+): question is Extract<Question, { type: "multiple-choice" }> {
+  return "type" in question && question.type === "multiple-choice";
+}
+
+function isScale(
+  question: Question,
+): question is Extract<Question, { type: "scale" }> {
+  return "type" in question && question.type === "scale";
+}
+
+function isVerdict(
+  question: Question,
+): question is Extract<Question, { type: "verdict" }> {
+  return "type" in question && question.type === "verdict";
+}
+
+/**
+ * Сколько значений должно быть в ответе: у шкалы — по одному на пару,
+ * у блиц-опроса — по одному на утверждение.
+ */
+function slotsOf(question: Question): number {
+  if (isScale(question)) return question.pairs.length;
+  if (isVerdict(question)) return question.statements.length;
+
+  return 1;
+}
 
 /**
  * Все шаги теста живут на одной странице: переходы делаются сменой блока
@@ -51,29 +87,15 @@ export function TestFlow({
   const total = questions.length;
 
   const [step, setStep] = useState<Step | null>(null);
-  const [stored, setStored] = useState<TestState | null>(null);
 
-  useEffect(() => {
-    // Читаем из localStorage только на клиенте
-    const raw = readRawState();
-    setStored(parseState(raw));
-
-    // Подписываемся на изменения
-    const handleChange = () => {
-      const newRaw = readRawState();
-      setStored(parseState(newRaw));
-    };
-
-    if (typeof window !== "undefined") {
-      window.addEventListener("storage", handleChange);
-      window.addEventListener("greenflag:test-state", handleChange);
-
-      return () => {
-        window.removeEventListener("storage", handleChange);
-        window.removeEventListener("greenflag:test-state", handleChange);
-      };
-    }
-  }, []);
+  // Снимок localStorage: на сервере и при гидрации — пустой, дальше реальный.
+  // Так состояние появляется сразу после гидрации, без лишних перерисовок.
+  const raw = useSyncExternalStore(
+    subscribeToState,
+    readRawState,
+    readServerState,
+  );
+  const stored = useMemo<TestState | null>(() => parseState(raw), [raw]);
 
   const languageControl = (
     <TestHeader
@@ -99,7 +121,6 @@ export function TestFlow({
     // Язык фиксируется здесь: дальше его сменить нельзя.
     const newState = stored ? withProfile(stored, profile) : createState(profile, locale);
     saveState(newState);
-    setStored(newState); // Обновляем локальный стейт сразу
     setStep({ kind: "question", index: 0 });
   }
 
@@ -107,7 +128,6 @@ export function TestFlow({
     if (!stored) return;
     const newState = withAnswer(stored, questions[index].id, questions[index].text, answer);
     saveState(newState);
-    setStored(newState); // Обновляем локальный стейт сразу
   }
 
   function handleNext(index: number, answer: { she: string; he: string }) {
@@ -145,7 +165,11 @@ export function TestFlow({
     return (
       <>
         {languageControl}
-        <div key="profile" className="animate-step flex flex-1 flex-col">
+        {/* Форма выше экрана на низких окнах — прокручиваем её саму. */}
+        <div
+          key="profile"
+          className="animate-step flex min-h-0 flex-1 flex-col overflow-y-auto pb-4"
+        >
           <ProfileStep
             key="profile-form"
             texts={formTexts}
@@ -160,7 +184,7 @@ export function TestFlow({
 
   if (active.kind === "done") {
     const answered = questions.filter((q) =>
-      stored ? isAnswered(stored, q.id) : false,
+      stored ? isAnswered(stored, q.id, slotsOf(q)) : false,
     ).length;
 
     return (
@@ -168,7 +192,7 @@ export function TestFlow({
         {languageControl}
         <div
           key="done"
-          className="animate-step flex flex-1 items-center justify-center py-4"
+          className="animate-step flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-4"
         >
           <div className="rounded-block shadow-block-lg flex w-full flex-col items-center bg-white p-6 text-center sm:p-8">
             <span aria-hidden className="text-3xl">
@@ -222,25 +246,49 @@ export function TestFlow({
   const index = Math.min(Math.max(active.index, 0), total - 1);
   const question = questions[index];
   const saved = stored?.answers[question.id];
-  const isMultipleChoice = "type" in question && question.type === "multiple-choice";
+  const initial = { she: saved?.she ?? "", he: saved?.he ?? "" };
+  const backLabel = index === 0 ? quizTexts.editProfile : quizTexts.back;
 
   return (
     <>
       {languageControl}
-      {/* key перемонтирует шаг: анимация и подстановка сохранённых ответов */}
+      {/* key перемонтирует шаг: анимация и подстановка сохранённых ответов.
+          Высота шага определена (страница h-dvh), поэтому внутренние flex-1
+          умеют сжиматься и список никогда не тянет страницу вниз. */}
       <div
         key={`q-${question.id}`}
         className="animate-step flex min-h-0 flex-1 flex-col"
       >
-        {isMultipleChoice ? (
+        {isChoice(question) ? (
           <ChoiceStep
             texts={quizTexts}
-            locale={locale}
-            question={question as Extract<typeof question, { type: "multiple-choice" }>}
+            question={question}
             index={index}
             total={total}
-            initial={{ she: saved?.she ?? "", he: saved?.he ?? "" }}
-            backLabel={index === 0 ? quizTexts.editProfile : quizTexts.back}
+            initial={initial}
+            backLabel={backLabel}
+            onSubmit={(answer) => handleNext(index, answer)}
+            onBack={(answer) => handleBack(index, answer)}
+          />
+        ) : isScale(question) ? (
+          <ScaleStep
+            texts={quizTexts}
+            question={question}
+            index={index}
+            total={total}
+            initial={initial}
+            backLabel={backLabel}
+            onSubmit={(answer) => handleNext(index, answer)}
+            onBack={(answer) => handleBack(index, answer)}
+          />
+        ) : isVerdict(question) ? (
+          <VerdictStep
+            texts={quizTexts}
+            question={question}
+            index={index}
+            total={total}
+            initial={initial}
+            backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
           />
@@ -248,13 +296,13 @@ export function TestFlow({
           <QuestionStep
             texts={quizTexts}
             locale={locale}
-            question={question as Extract<typeof question, { text: string; exampleShe?: string }>}
+            question={question}
             index={index}
             total={total}
-            initial={{ she: saved?.she ?? "", he: saved?.he ?? "" }}
+            initial={initial}
             // Распознавание речи работает только по-русски.
             voiceEnabled={locale === "ru"}
-            backLabel={index === 0 ? quizTexts.editProfile : quizTexts.back}
+            backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
           />
@@ -270,7 +318,9 @@ function derive(
 ): Step {
   if (!stored) return { kind: "profile" };
 
-  const firstUnanswered = questions.findIndex((q) => !isAnswered(stored, q.id));
+  const firstUnanswered = questions.findIndex(
+    (q) => !isAnswered(stored, q.id, slotsOf(q)),
+  );
 
   return firstUnanswered === -1
     ? { kind: "done" }

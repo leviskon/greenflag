@@ -1,9 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
 import type { AnswerPair } from "@/lib/storage";
+import { StepFooter } from "./step-footer";
 
 type Texts = Dictionary["quiz"];
 type Question = Extract<Texts["questions"][number], { type: "multiple-choice" }>;
@@ -16,7 +17,6 @@ const EMOJI_LIST = ["😤", "⚖️", "🏠", "😈", "🕊️", "🎉", "💝",
  */
 export function ChoiceStep({
   texts,
-  locale,
   question,
   index,
   total,
@@ -26,7 +26,6 @@ export function ChoiceStep({
   onBack,
 }: {
   texts: Texts;
-  locale: Locale;
   question: Question;
   index: number;
   total: number;
@@ -60,9 +59,10 @@ export function ChoiceStep({
   }
 
   function collect(): AnswerPair {
+    // Копии: sort мутирует массив, а состояние трогать во время рендера нельзя.
     return {
-      she: selectedShe.sort((a, b) => a - b).join(","),
-      he: selectedHe.sort((a, b) => a - b).join(","),
+      she: [...selectedShe].sort((a, b) => a - b).join(","),
+      he: [...selectedHe].sort((a, b) => a - b).join(","),
     };
   }
 
@@ -109,8 +109,8 @@ export function ChoiceStep({
         )}
       </div>
 
-      {/* Два столбца с вариантами выбора - фиксированная высота с внутренним скроллом */}
-      <div className="grid h-[360px] shrink-0 grid-cols-2 gap-2 sm:h-[420px]">
+      {/* Два столбца с вариантами: занимают свободное место, скролл внутри */}
+      <div className="grid min-h-24 flex-1 grid-cols-2 gap-2">
         <ChoiceColumn
           title={texts.turnShe}
           avatar="/woman.png"
@@ -127,20 +127,12 @@ export function ChoiceStep({
         />
       </div>
 
-      {/* Кнопка идёт с отступом и зафиксирована перед подсказкой */}
-      <button
-        type="button"
-        onClick={() => onSubmit(collect())}
+      <StepFooter
+        label={isLast ? texts.finish : texts.next}
+        hint={texts.hint}
         disabled={!ready}
-        className="shadow-pill mt-auto w-full shrink-0 rounded-full bg-pink-500 px-6 py-3 text-[15px] font-extrabold text-white transition-colors hover:bg-pink-600 active:translate-y-px disabled:bg-pink-200 disabled:shadow-none"
-      >
-        {isLast ? texts.finish : texts.next}
-      </button>
-
-      {/* Подсказка прижата к низу экрана */}
-      <p className="shrink-0 pt-2 text-center text-[10px] leading-snug text-ink-muted sm:text-xs">
-        {texts.hint}
-      </p>
+        onClick={() => onSubmit(collect())}
+      />
     </div>
   );
 }
@@ -161,10 +153,14 @@ function ChoiceColumn({
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-3xl bg-white p-2.5 shadow-block sm:p-3">
       <div className="mb-2 flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <img
+        <Image
           src={avatar}
           alt=""
-          className="h-9 w-9 rounded-full object-cover sm:h-10 sm:w-10"
+          aria-hidden
+          width={1024}
+          height={1024}
+          sizes="40px"
+          className="size-9 rounded-full object-cover sm:size-10"
         />
         <span className="text-xs font-extrabold text-pink-600 sm:text-sm">
           {title}

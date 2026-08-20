@@ -29,8 +29,11 @@ export default async function TestPage({
   const t = dict.testForm;
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-4 sm:px-6">
+    // Страница ровно во весь экран и без своего скролла: шаги теста сами
+    // распределяют высоту. Прокрутку включает только тот шаг, которому она
+    // нужна, — иначе на экране появляется вторая, ничего не делающая полоса.
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col overflow-hidden px-4 sm:px-6">
         <TestFlow
           formTexts={t}
           quizTexts={dict.quiz}
@@ -39,15 +42,17 @@ export default async function TestPage({
           header={
             // Картинка лежит на заднем плане и заходит под текст.
             <div className="relative isolate">
+              {/* Без priority: картинка декоративная, а с высоким приоритетом
+                  она отбирает канал у скриптов и на телефоне форма долго
+                  остаётся «мёртвой». */}
               <Image
                 src="/couple.png"
                 alt=""
                 aria-hidden
                 width={1024}
                 height={1024}
-                priority
                 sizes="(max-width: 640px) 42vw, 220px"
-                className="pointer-events-none absolute top-0 right-0 -z-10 w-32 max-w-none opacity-90 select-none sm:-top-3 sm:w-44 lg:w-52"
+                className="pointer-events-none absolute top-0 right-0 -z-10 w-32 max-w-none opacity-90 select-none sm:-top-3 sm:w-44 lg:-top-14 lg:w-52"
               />
 
               <h1 className="max-w-[62%] text-[26px] leading-[1.08] font-extrabold sm:max-w-[64%] sm:text-[28px] lg:text-[32px]">

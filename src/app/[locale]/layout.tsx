@@ -1,19 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import { Manrope, Unbounded } from "next/font/google";
+import { Geologica, Golos_Text } from "next/font/google";
 import { notFound } from "next/navigation";
 import { isLocale, locales } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionary";
 import "../globals.css";
 
-const manrope = Manrope({
-  variable: "--font-manrope",
-  subsets: ["cyrillic", "latin"],
+// Шрифты обязаны содержать кыргызские Ң (U+04A2), Ү (U+04AE), Ө (U+04E8):
+// они лежат в сабсете cyrillic-ext, поэтому его тоже запрашиваем.
+// Manrope и Unbounded здесь не подходят — этих глифов в их файлах нет.
+const golos = Golos_Text({
+  variable: "--font-golos",
+  subsets: ["cyrillic", "cyrillic-ext", "latin"],
   display: "swap",
 });
 
-const unbounded = Unbounded({
-  variable: "--font-unbounded",
-  subsets: ["cyrillic", "latin"],
+const geologica = Geologica({
+  variable: "--font-geologica",
+  subsets: ["cyrillic", "cyrillic-ext", "latin"],
   display: "swap",
   weight: ["600", "700", "800"],
 });
@@ -61,7 +64,7 @@ export default async function LocaleLayout({
     <html
       lang={locale}
       data-scroll-behavior="smooth"
-      className={`${manrope.variable} ${unbounded.variable} h-full antialiased`}
+      className={`${golos.variable} ${geologica.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
