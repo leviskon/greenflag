@@ -26,13 +26,17 @@ const RECOGNITION_LANG: Record<Locale, string> = {
   ky: "ru-RU",
 };
 
-/** Картинка к вопросу, если она есть. */
+/** Картинка к вопросу, если она есть. Номера файлов — номера вопросов. */
 const ILLUSTRATIONS: Record<string, string> = {
   peace: "/sorry.png",
   critique: "/critique.png",
   lastday: "/lastday.png",
   disagree: "/5.png",
   "change-behavior": "/6.png",
+  stranger: "/8.png",
+  annoy: "/9.png",
+  value: "/10.png",
+  jealousy: "/11.png",
 };
 
 export function QuestionStep({
@@ -46,6 +50,7 @@ export function QuestionStep({
   backLabel,
   onSubmit,
   onBack,
+  onChange,
 }: {
   texts: Texts;
   locale: Locale;
@@ -58,6 +63,8 @@ export function QuestionStep({
   backLabel: string;
   onSubmit: (answer: AnswerPair) => void;
   onBack: (answer: AnswerPair) => void;
+  /** Ответ сразу уходит в хранилище: перезагрузка ничего не теряет. */
+  onChange: (answer: AnswerPair) => void;
 }) {
   const [drafts, setDrafts] = useState<AnswerPair>(initial);
   const [recording, setRecording] = useState<Participant | null>(null);
@@ -80,8 +87,11 @@ export function QuestionStep({
 
   function commit(side: Participant) {
     const merged = [drafts[side], transcript].filter(Boolean).join(" ").trim();
-    setDrafts((prev) => ({ ...prev, [side]: merged }));
+    const updated = { ...drafts, [side]: merged };
+
+    setDrafts(updated);
     resetTranscript();
+    onChange({ she: updated.she.trim(), he: updated.he.trim() });
   }
 
   async function stopMic(side: Participant) {
@@ -138,7 +148,11 @@ export function QuestionStep({
       resetTranscript();
       setRecording(null);
     }
-    setDrafts((prev) => ({ ...prev, [side]: value }));
+
+    const updated = { ...drafts, [side]: value };
+
+    setDrafts(updated);
+    onChange({ she: updated.she.trim(), he: updated.he.trim() });
   }
 
   function collect(): AnswerPair {

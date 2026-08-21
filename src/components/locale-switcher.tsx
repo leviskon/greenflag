@@ -29,6 +29,10 @@ export function LocaleSwitcher({
             key={item}
             href={`/${item}${path}`}
             hrefLang={item}
+            // Смена языка — это та же страница, только на другом языке, поэтому
+            // не отматываем её в начало: иначе человек, переключивший язык из
+            // середины лендинга, оказывается на самом верху.
+            scroll={false}
             aria-current={active ? "true" : undefined}
             title={LOCALE_LABELS[item].full}
             className={cn(

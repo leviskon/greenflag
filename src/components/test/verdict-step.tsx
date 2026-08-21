@@ -46,6 +46,7 @@ export function VerdictStep({
   backLabel,
   onSubmit,
   onBack,
+  onChange,
 }: {
   texts: Texts;
   question: Question;
@@ -55,6 +56,8 @@ export function VerdictStep({
   backLabel: string;
   onSubmit: (answer: AnswerPair) => void;
   onBack: (answer: AnswerPair) => void;
+  /** Каждый выбор сразу уходит в хранилище: перезагрузка ничего не теряет. */
+  onChange: (answer: AnswerPair) => void;
 }) {
   const count = question.statements.length;
 
@@ -70,12 +73,13 @@ export function VerdictStep({
     statementIndex: number,
     verdict: Exclude<Verdict, null>,
   ) {
-    setVerdicts((prev) => {
-      const next = [...prev[side]];
-      next[statementIndex] = verdict;
+    const next = [...verdicts[side]];
+    next[statementIndex] = verdict;
 
-      return { ...prev, [side]: next };
-    });
+    const updated = { ...verdicts, [side]: next };
+
+    setVerdicts(updated);
+    onChange({ she: serialize(updated.she), he: serialize(updated.he) });
   }
 
   function collect(): AnswerPair {
@@ -146,21 +150,21 @@ export function VerdictStep({
         {question.statements.map((statement, statementIndex) => (
           <li
             key={statementIndex}
-            className="rounded-block shadow-block shrink-0 bg-white p-2.5 sm:p-3"
+            className="rounded-block shadow-block shrink-0 bg-white p-3 sm:p-4"
           >
-            <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-3">
               <span
                 aria-hidden
-                className="grid size-5 shrink-0 place-items-center rounded-full bg-pink-500 text-[10px] font-extrabold text-white sm:size-6 sm:text-[11px]"
+                className="grid size-6 shrink-0 place-items-center rounded-full bg-pink-500 text-[11px] font-extrabold text-white sm:size-7 sm:text-xs"
               >
                 {statementIndex + 1}
               </span>
-              <p className="min-w-0 flex-1 text-[12px] leading-tight font-bold sm:text-sm">
+              <p className="min-w-0 flex-1 text-[13px] leading-snug font-bold sm:text-base">
                 {statement}
               </p>
             </div>
 
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:gap-2.5">
+            <div className="mt-2.5 grid grid-cols-2 gap-2.5 sm:gap-3">
               <VerdictColumn
                 side="she"
                 title={texts.turnShe}
@@ -225,11 +229,11 @@ function VerdictColumn({
     <div
       role="radiogroup"
       aria-label={`${title}: ${statement}`}
-      className="flex min-w-0 flex-col gap-1.5"
+      className="flex min-w-0 flex-col gap-2"
     >
       <div
         className={cn(
-          "flex min-w-0 items-center gap-1.5 rounded-2xl px-1.5 py-1",
+          "flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5",
           side === "she" ? "bg-pink-50" : "bg-canvas",
         )}
       >
@@ -239,12 +243,12 @@ function VerdictColumn({
           aria-hidden
           width={1024}
           height={1024}
-          sizes="40px"
-          className="size-8 shrink-0 rounded-full object-cover sm:size-10"
+          sizes="(max-width: 640px) 48px, 64px"
+          className="size-11 shrink-0 rounded-full object-cover ring-2 ring-white sm:size-14"
         />
         <span
           className={cn(
-            "min-w-0 text-[10px] leading-tight font-extrabold sm:text-xs",
+            "min-w-0 text-[11px] leading-tight font-extrabold sm:text-sm",
             side === "she" ? "text-pink-600" : "text-ink-soft",
           )}
         >
@@ -299,7 +303,11 @@ function VerdictOption({
   } as const;
 
   return (
-    <label className="block cursor-pointer">
+    // relative обязателен: скрытая радиокнопка внутри — absolute, и без
+    // позиционированного родителя её якорем становится вся страница. Тогда она
+    // вылезает за пределы прокручиваемого списка, растягивает документ, а по
+    // клику браузер «доскролливает» до неё и страница прыгает вверх.
+    <label className="relative block cursor-pointer">
       <input
         type="radio"
         name={name}
@@ -310,7 +318,7 @@ function VerdictOption({
       />
       <span
         className={cn(
-          "flex items-center justify-center gap-1 rounded-2xl px-1.5 py-1.5 text-[11px] leading-tight font-extrabold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-pink-500 peer-focus-visible:ring-offset-2 sm:gap-1.5 sm:py-2 sm:text-[13px]",
+          "flex items-center justify-center gap-1.5 rounded-2xl px-2 py-2.5 text-[13px] leading-tight font-extrabold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-pink-500 peer-focus-visible:ring-offset-2 sm:gap-2 sm:py-3 sm:text-[15px]",
           active ? tones[tone].active : tones[tone].idle,
         )}
       >
@@ -330,7 +338,7 @@ function ThumbIcon({ up }: { up: boolean }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn("size-3.5 shrink-0 sm:size-4", up ? null : "rotate-180")}
+      className={cn("size-4 shrink-0 sm:size-5", up ? null : "rotate-180")}
       aria-hidden
     >
       <path d="M7 10v10H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3Z" />

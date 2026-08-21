@@ -67,6 +67,7 @@ export function ScaleStep({
   backLabel,
   onSubmit,
   onBack,
+  onChange,
 }: {
   texts: Texts;
   question: Question;
@@ -76,6 +77,8 @@ export function ScaleStep({
   backLabel: string;
   onSubmit: (answer: AnswerPair) => void;
   onBack: (answer: AnswerPair) => void;
+  /** Каждый выбор сразу уходит в хранилище: перезагрузка ничего не теряет. */
+  onChange: (answer: AnswerPair) => void;
 }) {
   const count = question.pairs.length;
 
@@ -85,12 +88,13 @@ export function ScaleStep({
   }));
 
   function pick(side: Participant, pairIndex: number, position: number) {
-    setPicks((prev) => {
-      const next = [...prev[side]];
-      next[pairIndex] = position;
+    const next = [...picks[side]];
+    next[pairIndex] = position;
 
-      return { ...prev, [side]: next };
-    });
+    const updated = { ...picks, [side]: next };
+
+    setPicks(updated);
+    onChange({ she: serialize(updated.she), he: serialize(updated.he) });
   }
 
   function collect(): AnswerPair {
@@ -269,7 +273,12 @@ function ScaleRow({
               key={position}
               // Одинаковая ширина у всех позиций: кружки разного размера, а
               // область нажатия остаётся крупной и на узком экране.
-              className="flex h-9 min-w-0 flex-1 basis-0 cursor-pointer items-center justify-center sm:h-14"
+              // relative обязателен: скрытая радиокнопка внутри — absolute, и
+              // без позиционированного родителя её якорем становится вся
+              // страница. Тогда она вылезает за пределы прокручиваемого списка,
+              // растягивает документ, а по клику браузер «доскролливает» до
+              // неё и страница прыгает вверх.
+              className="relative flex h-9 min-w-0 flex-1 basis-0 cursor-pointer items-center justify-center sm:h-14"
             >
               <input
                 type="radio"

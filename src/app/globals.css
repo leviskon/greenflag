@@ -129,6 +129,33 @@
   color: var(--color-pink-600);
 }
 
+/* Печать и «Сохранить как PDF»: отчёт должен уходить на бумагу целиком,
+   без липкой шапки, кнопок и разрывов внутри карточек. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  [class*="sticky"] {
+    position: static !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

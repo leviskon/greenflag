@@ -11,6 +11,12 @@ type Question = Extract<Texts["questions"][number], { type: "multiple-choice" }>
 
 const EMOJI_LIST = ["😤", "⚖️", "🏠", "😈", "🕊️", "🎉", "💝", "🔥", "🎯", "⭐", "🌊"];
 
+/** Ответ хранится как отсортированный список индексов через запятую. */
+function serialize(selected: number[]): string {
+  // Копия: sort мутирует массив, а состояние трогать во время рендера нельзя.
+  return [...selected].sort((a, b) => a - b).join(",");
+}
+
 /**
  * Вопрос с множественным выбором.
  * Каждый участник выбирает несколько вариантов из списка.
@@ -24,6 +30,7 @@ export function ChoiceStep({
   backLabel,
   onSubmit,
   onBack,
+  onChange,
 }: {
   texts: Texts;
   question: Question;
@@ -33,6 +40,8 @@ export function ChoiceStep({
   backLabel: string;
   onSubmit: (answer: AnswerPair) => void;
   onBack: (answer: AnswerPair) => void;
+  /** Каждый выбор сразу уходит в хранилище: перезагрузка ничего не теряет. */
+  onChange: (answer: AnswerPair) => void;
 }) {
   // Парсим сохранённые ответы (строка с индексами через запятую)
   const parseInitial = (str: string): number[] => {
@@ -48,22 +57,22 @@ export function ChoiceStep({
   );
 
   function toggleOption(side: "she" | "he", optionIndex: number) {
-    const setter = side === "she" ? setSelectedShe : setSelectedHe;
     const current = side === "she" ? selectedShe : selectedHe;
+    const next = current.includes(optionIndex)
+      ? current.filter((i) => i !== optionIndex)
+      : [...current, optionIndex];
 
-    if (current.includes(optionIndex)) {
-      setter(current.filter((i) => i !== optionIndex));
-    } else {
-      setter([...current, optionIndex]);
-    }
+    if (side === "she") setSelectedShe(next);
+    else setSelectedHe(next);
+
+    onChange({
+      she: serialize(side === "she" ? next : selectedShe),
+      he: serialize(side === "he" ? next : selectedHe),
+    });
   }
 
   function collect(): AnswerPair {
-    // Копии: sort мутирует массив, а состояние трогать во время рендера нельзя.
-    return {
-      she: [...selectedShe].sort((a, b) => a - b).join(","),
-      he: [...selectedHe].sort((a, b) => a - b).join(","),
-    };
+    return { she: serialize(selectedShe), he: serialize(selectedHe) };
   }
 
   const answer = collect();

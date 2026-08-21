@@ -220,10 +220,10 @@ export function TestFlow({
               </button>
               <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
                 <Link
-                  href={`/${locale}`}
+                  href={`/${locale}/report`}
                   className="shadow-pill rounded-full bg-pink-500 px-6 py-2.5 text-center text-sm font-extrabold text-white transition-colors hover:bg-pink-600"
                 >
-                  GreenFlag
+                  {quizTexts.openReport}
                 </Link>
                 <button
                   type="button"
@@ -269,6 +269,7 @@ export function TestFlow({
             backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
+            onChange={(answer) => persist(index, answer)}
           />
         ) : isScale(question) ? (
           <ScaleStep
@@ -280,6 +281,7 @@ export function TestFlow({
             backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
+            onChange={(answer) => persist(index, answer)}
           />
         ) : isVerdict(question) ? (
           <VerdictStep
@@ -291,6 +293,7 @@ export function TestFlow({
             backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
+            onChange={(answer) => persist(index, answer)}
           />
         ) : (
           <QuestionStep
@@ -305,6 +308,7 @@ export function TestFlow({
             backLabel={backLabel}
             onSubmit={(answer) => handleNext(index, answer)}
             onBack={(answer) => handleBack(index, answer)}
+            onChange={(answer) => persist(index, answer)}
           />
         )}
       </div>
