@@ -38,6 +38,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Пропускаем внутренние пути Next и файлы вроде /man.png или /favicon.ico
-  matcher: ["/((?!_next|.*\\..*).*)"],
+  // Пропускаем внутренние пути Next, файлы вроде /man.png или /favicon.ico и
+  // маршруты /api: у них нет языковой версии, а с редиректом POST-запрос до
+  // обработчика вообще не доходит.
+  matcher: ["/((?!_next|api|.*\\..*).*)"],
 };

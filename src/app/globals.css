@@ -140,6 +140,20 @@
   html,
   body {
     background: #fff;
+
+    /* Ширина печатного поля A4: 210mm минус поля страницы.
+       Без явной ширины браузер верстает страницу по ширине окна, а потом
+       сжимает всё, чтобы влезло в лист, — отчёт печатался колонкой на
+       половину страницы и мелким шрифтом. */
+    width: 186mm;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+
+    /* Иначе принтер выкидывает фоновые заливки: полосы, кольца метрик и
+       баннеры уходят белыми. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .no-print {
@@ -153,6 +167,40 @@
 
   [class*="sticky"] {
     position: static !important;
+  }
+
+  /* Экранная обёртка отчёта: на бумаге ни высота экрана, ни центрирование
+     по колонке не нужны — работаем по всей ширине листа. */
+  .print-root {
+    min-height: 0 !important;
+  }
+
+  .print-body {
+    width: 100% !important;
+    max-width: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  /*
+   * Карусель портрета. На экране три слайда лежат в ряд и сдвигаются
+   * трансформом, поэтому в PDF попадал только открытый слайд, а два других
+   * оставались за краем. На бумаге разворачиваем их в столбец.
+   */
+  .print-slides {
+    display: block !important;
+    transform: none !important;
+  }
+
+  .print-slide {
+    width: 100% !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-slide + .print-slide {
+    margin-top: 8mm;
   }
 }
 

@@ -110,33 +110,10 @@ export function Donut({
         </span>
       </div>
 
-      <span className="text-[11px] leading-tight font-bold text-ink-soft sm:text-xs">
+      {/* Названия метрик длинные, поэтому переносим их по смыслу и не режем. */}
+      <span className="text-[11px] leading-tight font-bold text-balance text-ink-soft sm:text-xs">
         {label}
       </span>
-    </div>
-  );
-}
-
-/** Крупное число со подписью: для флагометра и счётчиков. */
-export function Stat({
-  value,
-  label,
-  tone = "mid",
-}: {
-  value: number | string;
-  label: string;
-  tone?: Tone | "ink";
-}) {
-  const color = tone === "ink" ? "text-ink" : TONE_TEXT[tone];
-
-  return (
-    <div className="rounded-2xl bg-canvas p-3 text-center">
-      <p className={cn("font-display text-2xl font-extrabold", color)}>
-        {value}
-      </p>
-      <p className="mt-0.5 text-[10px] leading-tight font-bold text-ink-soft sm:text-[11px]">
-        {label}
-      </p>
     </div>
   );
 }
@@ -161,49 +138,69 @@ export function Bar({ value, tone }: { value: number; tone: Tone }) {
 
 /**
  * Заблокированный блок: настоящий текст появится в полной версии, поэтому
- * показываем заглушку под размытием и кнопку. В печати размытие убираем —
- * принтеры и PDF рендерят backdrop-filter непредсказуемо.
+ * показываем заглушку под размытием. В печати размытие убираем — принтеры и
+ * PDF рендерят backdrop-filter непредсказуемо.
  */
 export function LockedBlock({
   tag,
   title,
   placeholder,
-  cta,
-  onOpen,
 }: {
   tag: string;
   title: string;
   placeholder: string;
-  cta: string;
-  onOpen: () => void;
 }) {
   return (
-    <div className="rounded-block shadow-block avoid-break relative overflow-hidden bg-white p-4 print:shadow-none">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-extrabold sm:text-base">{title}</h3>
+    // h-full: соседние карточки в ряду выравниваются по самой высокой.
+    <div className="rounded-block shadow-block avoid-break flex h-full flex-col bg-white p-4 print:shadow-none">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 text-sm font-extrabold text-balance sm:text-base">
+          {title}
+        </h3>
         <span className="shrink-0 rounded-full border border-dashed border-ink-muted/50 px-2 py-0.5 text-[10px] font-extrabold tracking-[0.06em] text-ink-muted uppercase">
           {tag}
         </span>
       </div>
 
-      <p className="mt-2 text-[12px] leading-snug text-ink opacity-30">
-        {placeholder}
-      </p>
-
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 top-9 bg-white/30 backdrop-blur-[3px] print:bg-white/70 print:backdrop-blur-none"
-      />
-
-      <div className="absolute inset-x-0 bottom-3 flex justify-center">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="shadow-pill no-print rounded-full bg-pink-500 px-4 py-1.5 text-[11px] font-extrabold text-white transition-colors hover:bg-pink-600"
+      {/* Размытие накрывает только заглушку. Раньше оно шло от фиксированного
+          отступа сверху и заезжало на заголовок, когда тот вставал в две строки. */}
+      <div className="relative mt-3 flex min-h-28 flex-1 items-center overflow-hidden rounded-2xl bg-canvas p-3">
+        <p
+          aria-hidden
+          className="text-[12px] leading-snug text-ink opacity-40"
         >
-          🔒 {cta}
-        </button>
+          {placeholder}
+        </p>
+
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-white/30 backdrop-blur-[2px] print:bg-white/75 print:backdrop-blur-none"
+        />
+
+        <span
+          aria-hidden
+          className="absolute inset-0 grid place-items-center text-ink-muted"
+        >
+          <LockIcon />
+        </span>
       </div>
     </div>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      className="size-5 shrink-0"
+      aria-hidden
+    >
+      <rect x="4" y="10" width="16" height="10" rx="2.5" fill="currentColor" stroke="none" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    </svg>
   );
 }

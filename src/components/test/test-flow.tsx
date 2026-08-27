@@ -1,13 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Tag } from "@/components/ui";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
 import {
-  clearState,
   createState,
   EMPTY_PROFILE,
   isAnswered,
@@ -21,6 +24,7 @@ import {
   type CoupleProfile,
   type TestState,
 } from "@/lib/storage";
+import { AnalyzingStep } from "./analyzing-step";
 import { ProfileStep } from "./profile-step";
 import { QuestionStep } from "./question-step";
 import { ChoiceStep } from "./choice-step";
@@ -31,7 +35,8 @@ import { TestHeader } from "./test-header";
 type Step =
   | { kind: "profile" }
   | { kind: "question"; index: number }
-  | { kind: "done" };
+  /** Все ответы собраны: ждём отчёт и уходим на него без кнопок. */
+  | { kind: "analyzing" };
 
 type Question = Dictionary["quiz"]["questions"][number];
 
@@ -117,6 +122,25 @@ export function TestFlow({
 
   const active: Step = step ?? derive(stored, questions);
 
+  /**
+   * Ожидание показываем только тому, кто прямо сейчас ответил на последний
+   * вопрос. Если пара просто открыла тест с готовыми ответами, держать её
+   * шесть секунд не за что — уводим в отчёт сразу.
+   */
+  const justFinished = step?.kind === "analyzing" && stored !== null;
+  const skipWait = active.kind === "analyzing" && !justFinished;
+
+  // Стабильная ссылка: экран ожидания держит на ней таймеры и перезапустил бы
+  // их, если бы функция пересоздавалась на каждый рендер.
+  const goToReport = useCallback(
+    () => router.replace(`/${locale}/report`),
+    [router, locale],
+  );
+
+  useEffect(() => {
+    if (skipWait) goToReport();
+  }, [skipWait, goToReport]);
+
   function handleProfile(profile: CoupleProfile) {
     // Язык фиксируется здесь: дальше его сменить нельзя.
     const newState = stored ? withProfile(stored, profile) : createState(profile, locale);
@@ -135,7 +159,7 @@ export function TestFlow({
     setStep(
       index + 1 < total
         ? { kind: "question", index: index + 1 }
-        : { kind: "done" },
+        : { kind: "analyzing" },
     );
   }
 
@@ -182,63 +206,22 @@ export function TestFlow({
     );
   }
 
-  if (active.kind === "done") {
-    const answered = questions.filter((q) =>
-      stored ? isAnswered(stored, q.id, slotsOf(q)) : false,
-    ).length;
-
+  if (active.kind === "analyzing") {
     return (
       <>
         {languageControl}
-        <div
-          key="done"
-          className="animate-step flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-4"
-        >
-          <div className="rounded-block shadow-block-lg flex w-full flex-col items-center bg-white p-6 text-center sm:p-8">
-            <span aria-hidden className="text-3xl">
-              💌
-            </span>
-            <h1 className="mt-3 text-xl font-extrabold sm:text-2xl">
-              {quizTexts.doneTitle}
-            </h1>
-            <p className="mt-2 text-sm leading-relaxed text-ink-soft">
-              {quizTexts.doneText}
-            </p>
-            <p className="mt-4">
-              <Tag tone="green">
-                {quizTexts.doneCounter}: {answered} / {total}
-              </Tag>
-            </p>
-
-            <div className="mt-5 flex w-full flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => setStep({ kind: "question", index: total - 1 })}
-                className="shadow-block rounded-full bg-white px-6 py-2.5 text-sm font-extrabold text-ink transition-colors hover:text-pink-600"
-              >
-                ← {quizTexts.back}
-              </button>
-              <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-                <Link
-                  href={`/${locale}/report`}
-                  className="shadow-pill rounded-full bg-pink-500 px-6 py-2.5 text-center text-sm font-extrabold text-white transition-colors hover:bg-pink-600"
-                >
-                  {quizTexts.openReport}
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearState();
-                    setStep({ kind: "profile" });
-                  }}
-                  className="shadow-block rounded-full bg-white px-6 py-2.5 text-sm font-extrabold text-ink transition-colors hover:text-pink-600"
-                >
-                  {quizTexts.restart}
-                </button>
-              </div>
-            </div>
+        {justFinished && stored ? (
+          <AnalyzingStep
+            key="analyzing"
+            texts={quizTexts.analyzing}
+            state={stored}
+            onDone={goToReport}
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center">
+            <p className="text-sm text-ink-soft">{quizTexts.loading}</p>
           </div>
-        </div>
+        )}
       </>
     );
   }
@@ -326,7 +309,8 @@ function derive(
     (q) => !isAnswered(stored, q.id, slotsOf(q)),
   );
 
+  // Всё заполнено — на тесте делать нечего, уводим в отчёт через ожидание.
   return firstUnanswered === -1
-    ? { kind: "done" }
+    ? { kind: "analyzing" }
     : { kind: "question", index: firstUnanswered };
 }

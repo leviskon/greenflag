@@ -102,12 +102,15 @@ function Portrait({ src, label }: { src: string; label: string }) {
   return (
     <figure className="flex flex-col gap-2">
       <div className="aspect-square overflow-hidden rounded-2xl bg-pink-50">
+        {/* Первый экран, поэтому загружаем сразу. preload не ставим: портретов
+            два, и какой из них окажется LCP — зависит от ширины экрана.
+            priority в Next 16 объявлен устаревшим. */}
         <Image
           src={src}
           alt={label}
           width={1024}
           height={1024}
-          priority
+          loading="eager"
           sizes="(max-width: 640px) 45vw, 220px"
           className="size-full object-cover"
         />

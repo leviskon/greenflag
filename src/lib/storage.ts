@@ -221,11 +221,18 @@ export function parseState(raw: string | null): TestState | null {
   if (!raw) return null;
 
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return isState(parsed) ? parsed : null;
+    return parseStateValue(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/**
+ * Та же проверка, но для уже разобранного значения: этим пользуется
+ * серверный маршрут, которому состояние приходит телом запроса.
+ */
+export function parseStateValue(value: unknown): TestState | null {
+  return isState(value) ? value : null;
 }
 
 /**
@@ -290,13 +297,92 @@ export function clearState(): void {
   if (typeof window === "undefined") return;
 
   memorySnapshot = "";
+  analysisSnapshot = "";
 
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(ANALYSIS_KEY);
   } catch {
     // Удалять нечего.
   }
 
   clearProfileDraft();
   window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+/* ─── Разбор нейросети ─────────────────────────────────────────────────── */
+
+export const ANALYSIS_KEY = "greenflag.analysis.v2";
+
+let analysisSnapshot = "";
+
+/**
+ * Подпись ответов.
+ *
+ * Разбор относится к конкретным ответам. Если пара вернулась и что-то
+ * поменяла, старый разбор показывать нельзя: числа перестанут сходиться с
+ * таблицами, которые считаются на месте. Проще всего это поймать подписью.
+ */
+export function answersSignature(state: TestState): string {
+  const source = Object.entries(state.answers)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, answer]) => `${id}:${answer.she}|${answer.he}`)
+    .join("~");
+
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+export function saveAnalysis(state: TestState, analysis: unknown): void {
+  if (typeof window === "undefined") return;
+
+  const serialized = JSON.stringify({
+    signature: answersSignature(state),
+    analysis,
+  });
+
+  analysisSnapshot = serialized;
+
+  try {
+    window.localStorage.setItem(ANALYSIS_KEY, serialized);
+  } catch {
+    // Не сохранился — отчёт соберётся по формулам.
+  }
+
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+/** Снимок разбора для useSyncExternalStore. */
+export function readRawAnalysis(): string {
+  if (typeof window === "undefined") return "";
+
+  try {
+    return window.localStorage.getItem(ANALYSIS_KEY) ?? analysisSnapshot;
+  } catch {
+    return analysisSnapshot;
+  }
+}
+
+/** Разбор, если он относится именно к этим ответам. Иначе null. */
+export function readAnalysisFor(
+  raw: string | null,
+  state: TestState | null,
+): unknown {
+  if (!raw || !state) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+
+    const stored = parsed as { signature?: unknown; analysis?: unknown };
+
+    return stored.signature === answersSignature(state) ? stored.analysis : null;
+  } catch {
+    return null;
+  }
 }
