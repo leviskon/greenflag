@@ -21,7 +21,6 @@ export type CoupleProfile = {
   she: PersonProfile;
   he: PersonProfile;
   since: string;
-  email: string;
 };
 
 /** Пара ответов на один вопрос. */
@@ -48,7 +47,6 @@ export const EMPTY_PROFILE: CoupleProfile = {
   she: { name: "", birthday: "" },
   he: { name: "", birthday: "" },
   since: "",
-  email: "",
 };
 
 export function createState(
@@ -116,34 +114,6 @@ function isFilled(value: string, slots: number): boolean {
   return parts.length === slots && parts.every((part) => part.trim() !== "");
 }
 
-/** Готовый к отправке в ИИ вид: порядок вопросов и подписанные ответы. */
-export function buildAiPayload(
-  state: TestState,
-  order: readonly { id: string }[],
-) {
-  return {
-    language: state.locale,
-    couple: {
-      she: state.profile.she,
-      he: state.profile.he,
-      relationshipSince: state.profile.since,
-      email: state.profile.email,
-    },
-    startedAt: state.createdAt,
-    updatedAt: state.updatedAt,
-    answers: order.map((q) => {
-      const stored = state.answers[q.id];
-
-      return {
-        id: q.id,
-        question: stored?.question ?? "",
-        she: stored?.she ?? "",
-        he: stored?.he ?? "",
-      };
-    }),
-  };
-}
-
 function isProfile(value: unknown): value is CoupleProfile {
   if (typeof value !== "object" || value === null) return false;
 
@@ -151,7 +121,6 @@ function isProfile(value: unknown): value is CoupleProfile {
 
   return (
     typeof profile.since === "string" &&
-    typeof profile.email === "string" &&
     typeof profile.she?.name === "string" &&
     typeof profile.she?.birthday === "string" &&
     typeof profile.he?.name === "string" &&
@@ -208,7 +177,6 @@ function isState(value: unknown): value is TestState {
     isLocale(state.locale) &&
     typeof profile === "object" &&
     profile !== null &&
-    typeof profile.email === "string" &&
     typeof profile.she?.name === "string" &&
     typeof profile.he?.name === "string" &&
     typeof state.answers === "object" &&

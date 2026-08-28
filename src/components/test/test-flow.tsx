@@ -197,6 +197,7 @@ export function TestFlow({
           <ProfileStep
             key="profile-form"
             texts={formTexts}
+            locale={locale}
             header={header}
             initial={stored?.profile ?? EMPTY_PROFILE}
             onSubmit={handleProfile}

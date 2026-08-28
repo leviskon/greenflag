@@ -38,6 +38,9 @@ const onServer = () => false;
 /** Какие блоки показываем закрытыми: тексты берём из словаря лендинга. */
 const LOCKED_IDS = ["cheating", "dates", "fun"] as const;
 
+/** Корень отчёта: по нему сборщик PDF находит блоки. */
+const REPORT_ROOT_ID = "report-root";
+
 export function ReportView({
   dict,
   locale,
@@ -71,57 +74,53 @@ export function ReportView({
 
   const router = useRouter();
   const ready = useSyncExternalStore(neverChanges, onClient, onServer);
-  const [copied, setCopied] = useState(false);
 
   // Уходим на тест заново: пока идёт переход, отчёт уже пустой, поэтому
   // показываем загрузку, а не карточку «отчёта пока нет».
   const [restarting, setRestarting] = useState(false);
+
+  /** Сборка PDF занимает секунду-две: на это время кнопка занята. */
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const report = useMemo(
     () => (stored ? buildReport(stored, dict.quiz, analysis) : null),
     [stored, dict.quiz, analysis],
   );
 
-  /**
-   * Сохранение в PDF идёт через печать: браузер не даёт странице сохранить
-   * файл сам, окно печати обязательное. Что мы можем — отдать ему готовый
-   * макет A4 (см. @media print в globals.css) и осмысленное имя файла:
-   * и Chrome, и Safari подставляют в имя PDF заголовок документа.
-   */
-  function handleSavePdf() {
-    const previous = document.title;
-    const name = report?.names.she.trim();
-    const partner = report?.names.he.trim();
+  /** Имя файла: «GreenFlag — отчёт Катя и Сергей.pdf». */
+  function pdfFileName(): string {
+    const she = report?.names.she.trim();
+    const he = report?.names.he.trim();
 
-    if (name && partner) {
-      document.title = t.actions.pdfFile
-        .replace("{she}", name)
-        .replace("{he}", partner);
-    }
+    const title =
+      she && he
+        ? t.actions.pdfFile.replace("{she}", she).replace("{he}", he)
+        : t.metaTitle;
 
-    const restore = () => {
-      document.title = previous;
-      window.removeEventListener("afterprint", restore);
-    };
-
-    window.addEventListener("afterprint", restore);
-    window.print();
+    // Символы, недопустимые в именах файлов, браузер вырежет сам, но лучше
+    // отдать сразу чистое имя.
+    return `${title.replace(/[\\/:*?"<>|]/g, " ").trim()}.pdf`;
   }
 
-  async function handleShare() {
-    const url = window.location.href;
+  /**
+   * Сборка PDF на устройстве, без окна печати. Если что-то не срослось
+   * (старый браузер, незагруженная картинка), уходим в печать — там пара
+   * сможет сохранить файл сама.
+   */
+  async function handleSavePdf() {
+    const root = document.getElementById(REPORT_ROOT_ID);
+    if (!root || pdfBusy) return;
+
+    setPdfBusy(true);
 
     try {
-      if (navigator.share) {
-        await navigator.share({ title: t.metaTitle, url });
-        return;
-      }
-
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Пользователь закрыл системное окно — ничего делать не нужно.
+      const { downloadReportPdf } = await import("@/lib/pdf");
+      await downloadReportPdf(root, pdfFileName());
+    } catch (error) {
+      console.error("[report] pdf failed", error);
+      window.print();
+    } finally {
+      setPdfBusy(false);
     }
   }
 
@@ -135,23 +134,18 @@ export function ReportView({
           Green<span className="text-pink-500">Flag</span>
         </Link>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleShare()}
-            className="shadow-block rounded-full bg-white px-3 py-1.5 text-[11px] font-extrabold text-ink transition-colors hover:text-pink-600"
-          >
-            {copied ? t.actions.copied : t.actions.share}
-          </button>
-          <button
-            type="button"
-            onClick={handleSavePdf}
-            title={t.actions.pdfHint}
-            className="shadow-pill rounded-full bg-pink-500 px-3 py-1.5 text-[11px] font-extrabold text-white transition-colors hover:bg-pink-600"
-          >
-            {t.actions.pdf}
-          </button>
-        </div>
+        {/* Кнопки «Поделиться» здесь не будет: ответы и разбор лежат в
+            localStorage, по ссылке на другом устройстве откроется пустая
+            страница. */}
+        <button
+          type="button"
+          onClick={() => void handleSavePdf()}
+          disabled={pdfBusy}
+          aria-busy={pdfBusy}
+          className="shadow-pill rounded-full bg-pink-500 px-3 py-1.5 text-[11px] font-extrabold text-white transition-colors hover:bg-pink-600 disabled:opacity-70"
+        >
+          {pdfBusy ? t.actions.pdfBusy : t.actions.pdf}
+        </button>
       </div>
     </header>
   );
@@ -198,9 +192,16 @@ export function ReportView({
     <div className="print-root min-h-dvh bg-canvas">
       {header}
 
-      <main className="print-body mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-10 sm:px-6">
+      {/* id — корень для сборки PDF: из него берутся блоки с data-pdf-block. */}
+      <main
+        id={REPORT_ROOT_ID}
+        className="print-body mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-10 sm:px-6"
+      >
         {/* Шапка отчёта: заголовок и подводка, картинка задаёт высоту блока */}
-        <section className="rounded-block shadow-block avoid-break flex items-center gap-3 bg-white p-4 print:shadow-none sm:p-6">
+        <section
+          data-pdf-block
+          className="rounded-block shadow-block avoid-break flex items-center gap-3 bg-white p-4 print:shadow-none sm:p-6"
+        >
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-extrabold tracking-[0.06em] text-pink-600 uppercase">
               {t.hero.tag}

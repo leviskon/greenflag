@@ -27,7 +27,7 @@ export function SiteHeader({
           Green<span className="text-pink-500">Flag</span>
         </Link>
 
-        <nav aria-label={dict.nav.report} className="hidden lg:block">
+        <nav aria-label={dict.nav.label} className="hidden lg:block">
           <ul className="flex items-center gap-1">
             {NAV_KEYS.map((link) => (
               <li key={link.id}>
@@ -45,14 +45,20 @@ export function SiteHeader({
         <div className="flex items-center gap-2">
           <LocaleSwitcher locale={locale} label={dict.switcher.label} />
 
-          {/* min-w держит ширину кнопки одинаковой на всех языках,
-              иначе переключатель смещался бы при смене локали. */}
-          <Cta
-            href={`/${locale}/test`}
-            className="hidden min-w-36 lg:inline-flex"
-          >
-            {dict.cta.take}
-          </Cta>
+          {/*
+            Скрытие вынесено на обёртку, а не на саму кнопку: у Cta в базовых
+            классах есть inline-flex, и рядом с hidden выигрывал тот, что стоит
+            ниже в собранном CSS, — на телефоне кнопка всё равно показывалась.
+            У обёртки display свой, конфликта нет.
+
+            min-w держит ширину кнопки одинаковой на всех языках, иначе
+            переключатель смещался бы при смене локали.
+          */}
+          <span className="hidden lg:block">
+            <Cta href={`/${locale}/test`} className="min-w-36">
+              {dict.cta.take}
+            </Cta>
+          </span>
         </div>
       </div>
     </header>

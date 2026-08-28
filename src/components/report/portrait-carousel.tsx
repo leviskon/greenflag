@@ -68,6 +68,9 @@ export function PortraitCarousel({
           {slides.map((slide, index) => (
             <div
               key={slide.title}
+              // Каждый слайд — отдельный блок PDF: в файл уходят все три, а не
+              // только открытый.
+              data-pdf-block
               className="print-slide w-full shrink-0"
               aria-hidden={index !== active}
             >

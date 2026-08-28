@@ -34,6 +34,9 @@ export function ReportBlock({
 }) {
   return (
     <section
+      // data-pdf-block: блок целиком попадает в PDF отдельной картинкой,
+      // поэтому карточка не разрывается между страницами.
+      data-pdf-block
       className={cn(
         "rounded-block shadow-block avoid-break bg-white p-4 print:shadow-none sm:p-6",
         className,

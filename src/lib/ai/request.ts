@@ -15,8 +15,8 @@ type ApiResponse = { ok?: boolean; analysis?: unknown; reason?: string };
 /**
  * Что уходит на сервер: имена, дата начала отношений и ответы.
  *
- * Почта и даты рождения для разбора не нужны, поэтому не покидают устройство —
- * так в запросе нет ни одного поля, которое модель всё равно не читает.
+ * Даты рождения для разбора не нужны, поэтому не покидают устройство — так в
+ * запросе нет ни одного поля, которое модель всё равно не читает.
  */
 function forRequest(state: TestState): TestState {
   return {
@@ -25,7 +25,6 @@ function forRequest(state: TestState): TestState {
       she: { name: state.profile.she.name, birthday: "" },
       he: { name: state.profile.he.name, birthday: "" },
       since: state.profile.since,
-      email: "",
     },
   };
 }

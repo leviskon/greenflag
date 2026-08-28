@@ -2,9 +2,8 @@ import Link from "next/link";
 import { NAV_KEYS } from "@/lib/content";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/dictionary";
+import { LEGAL_DOCS } from "@/lib/legal";
 import { LocaleSwitcher } from "./locale-switcher";
-
-const LEGAL_KEYS = ["terms", "privacy", "offer"] as const;
 
 export function SiteFooter({
   dict,
@@ -31,7 +30,7 @@ export function SiteFooter({
             <LocaleSwitcher locale={locale} label={dict.switcher.label} />
           </div>
 
-          <nav aria-label={dict.nav.report} className="flex flex-col gap-2">
+          <nav aria-label={dict.nav.label} className="flex flex-col gap-2">
             {NAV_KEYS.map((l) => (
               <a
                 key={l.id}
@@ -43,30 +42,17 @@ export function SiteFooter({
             ))}
           </nav>
 
-          <div className="flex flex-col gap-2">
-            <a
-              href="mailto:support@greenflag.app"
-              className="text-sm text-ink-soft transition-colors hover:text-pink-600"
-            >
-              support@greenflag.app
-            </a>
-            <a
-              href="https://t.me/greenflag_support"
-              className="text-sm text-ink-soft transition-colors hover:text-pink-600"
-            >
-              @greenflag_support
-            </a>
-            <div className="mt-2 flex flex-col gap-1.5">
-              {LEGAL_KEYS.map((key) => (
-                <a
-                  key={key}
-                  href="#"
-                  className="text-xs text-ink-muted transition-colors hover:text-ink-soft"
-                >
-                  {dict.footer.legal[key]}
-                </a>
-              ))}
-            </div>
+          {/* Почты и телеграма здесь нет: контакты пока не публикуем. */}
+          <div className="flex flex-col gap-1.5">
+            {LEGAL_DOCS.map((key) => (
+              <Link
+                key={key}
+                href={`/${locale}/legal/${key}`}
+                className="text-xs text-ink-muted transition-colors hover:text-ink-soft"
+              >
+                {dict.footer.legal[key]}
+              </Link>
+            ))}
           </div>
         </div>
 

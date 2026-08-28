@@ -2,7 +2,9 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/components/ui";
+import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
+import type { LegalDoc } from "@/lib/legal";
 import {
   readProfileDraft,
   saveProfileDraft,
@@ -17,12 +19,9 @@ type Fields = {
   heName: string;
   heBirthday: string;
   since: string;
-  email: string;
 };
 
 type Errors = Partial<Record<keyof Fields, string>>;
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 const FIELD_KEYS = [
   "sheName",
@@ -30,7 +29,6 @@ const FIELD_KEYS = [
   "heName",
   "heBirthday",
   "since",
-  "email",
 ] as const;
 
 function toFields(profile: CoupleProfile): Fields {
@@ -40,7 +38,6 @@ function toFields(profile: CoupleProfile): Fields {
     heName: profile.he.name,
     heBirthday: profile.he.birthday,
     since: profile.since,
-    email: profile.email,
   };
 }
 
@@ -64,17 +61,19 @@ function toProfile(fields: Fields): CoupleProfile {
     she: { name: fields.sheName.trim(), birthday: fields.sheBirthday },
     he: { name: fields.heName.trim(), birthday: fields.heBirthday },
     since: fields.since,
-    email: fields.email.trim(),
   };
 }
 
 export function ProfileStep({
   texts,
+  locale,
   header,
   initial,
   onSubmit,
 }: {
   texts: Texts;
+  /** Нужен для ссылок на правовые страницы. */
+  locale: Locale;
   /** Заголовок с картинкой: рендерится на сервере. */
   header: React.ReactNode;
   /** Уже сохранённые данные пары — подставляются при возврате назад. */
@@ -128,7 +127,6 @@ export function ProfileStep({
     if (!values.heName.trim()) next.heName = texts.errors.name;
     if (!values.heBirthday) next.heBirthday = texts.errors.birthday;
     if (!values.since) next.since = texts.errors.since;
-    if (!EMAIL_RE.test(values.email.trim())) next.email = texts.errors.email;
 
     return next;
   }
@@ -240,6 +238,8 @@ export function ProfileStep({
             </fieldset>
           </div>
 
+          {/* Поле e-mail убрано: отчёт никуда не отправляется, пара видит его
+              сразу после теста. */}
           <div className="mt-2 flex flex-col gap-2 sm:mt-2.5">
             <Field
               name="since"
@@ -249,19 +249,6 @@ export function ProfileStep({
               value={fields.since}
               onChange={(v) => update("since", v)}
               error={errors.since}
-              tone="soft"
-            />
-            <Field
-              name="email"
-              label={texts.emailLabel}
-              hint={texts.emailHint}
-              type="email"
-              inputMode="email"
-              value={fields.email}
-              onChange={(v) => update("email", v)}
-              placeholder={texts.emailPlaceholder}
-              error={errors.email}
-              autoComplete="email"
               tone="soft"
             />
           </div>
@@ -279,20 +266,41 @@ export function ProfileStep({
           {texts.submit}
         </button>
 
+        {/* Ссылки открываются в новой вкладке: заполненная форма и черновик
+            остаются на месте, читать документ можно не теряя ввод. */}
         <p className="text-center text-[10px] leading-snug text-ink-muted sm:text-xs">
-          {texts.legalBefore} <LegalLink>{texts.legalOffer}</LegalLink>,{" "}
-          <LegalLink>{texts.legalTerms}</LegalLink> {texts.legalAnd}{" "}
-          <LegalLink>{texts.legalPrivacy}</LegalLink>
+          {texts.legalBefore}{" "}
+          <LegalLink locale={locale} doc="offer">
+            {texts.legalOffer}
+          </LegalLink>
+          ,{" "}
+          <LegalLink locale={locale} doc="terms">
+            {texts.legalTerms}
+          </LegalLink>{" "}
+          {texts.legalAnd}{" "}
+          <LegalLink locale={locale} doc="privacy">
+            {texts.legalPrivacy}
+          </LegalLink>
         </p>
       </div>
     </form>
   );
 }
 
-function LegalLink({ children }: { children: React.ReactNode }) {
+function LegalLink({
+  locale,
+  doc,
+  children,
+}: {
+  locale: Locale;
+  doc: LegalDoc;
+  children: React.ReactNode;
+}) {
   return (
     <a
-      href="#"
+      href={`/${locale}/legal/${doc}`}
+      target="_blank"
+      rel="noopener"
       className="text-pink-600 underline decoration-dashed underline-offset-2"
     >
       {children}
@@ -311,7 +319,6 @@ function Field({
   placeholder,
   error,
   autoComplete,
-  inputMode,
   tone = "plain",
 }: {
   /** Совпадает с ключом в Fields: по нему читаем ввод до гидрации. */
@@ -320,11 +327,10 @@ function Field({
   hint?: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "date" | "month" | "email";
+  type?: "text" | "date" | "month";
   placeholder?: string;
   error?: string;
   autoComplete?: string;
-  inputMode?: "email" | "text";
   tone?: "plain" | "soft";
 }) {
   const id = useId();
@@ -353,7 +359,6 @@ function Field({
         id={id}
         name={name}
         type={type}
-        inputMode={inputMode}
         autoComplete={autoComplete}
         placeholder={placeholder}
         value={value}

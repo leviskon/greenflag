@@ -1,5 +1,10 @@
 import Image from "next/image";
-import { COMPATIBILITY, FLAG_STATS, HERO_FACTS } from "@/lib/content";
+import {
+  COMPATIBILITY,
+  FLAG_STATS,
+  HERO_CTA_ID,
+  HERO_FACTS,
+} from "@/lib/content";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/dictionary";
 import { Cta, Tag } from "./ui";
@@ -28,17 +33,16 @@ export function Hero({
             {t.text}
           </p>
 
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+          {/* id — метка для липкой кнопки снизу: пока этот блок на экране,
+              она не показывается (см. mobile-cta.tsx). */}
+          <div
+            id={HERO_CTA_ID}
+            className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row"
+          >
+            {/* Вторая кнопка «Что в отчёте» вела к секции с разбором отчёта,
+                а её на странице больше нет. */}
             <Cta href={`/${locale}/test`} size="lg" className="w-full sm:w-auto">
               {dict.cta.start}
-            </Cta>
-            <Cta
-              href="#report"
-              size="lg"
-              variant="soft"
-              className="w-full sm:w-auto"
-            >
-              {dict.cta.whatInside}
             </Cta>
           </div>
 
