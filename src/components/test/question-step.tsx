@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import SpeechRecognition, {
   useSpeechRecognition,
 } from "react-speech-recognition";
@@ -38,6 +38,11 @@ const ILLUSTRATIONS: Record<string, string> = {
   value: "/10.png",
   jealousy: "/11.png",
 };
+
+/** Склейка «уже набранное + распознанное» без лишних пробелов. */
+function join(base: string, addition: string): string {
+  return [base.trim(), addition.trim()].filter(Boolean).join(" ");
+}
 
 export function QuestionStep({
   texts,
@@ -79,39 +84,87 @@ export function QuestionStep({
     isMicrophoneAvailable,
   } = useSpeechRecognition();
 
-  // Распознанный текст показываем прямо в поле, не трогая состояние в эффектах.
-  function shown(side: Participant) {
-    if (recording !== side || !transcript) return drafts[side];
-    return [drafts[side], transcript].filter(Boolean).join(" ");
-  }
+  /**
+   * Кто диктует и что было в его поле на момент старта записи.
+   *
+   * Держим в ref, а не в состоянии: распознавание присылает последний кусок
+   * текста уже после того, как остановилось, и этот кусок должен попасть
+   * в ответ, даже если кнопка микрофона уже вернулась в обычный вид.
+   */
+  const activeRef = useRef<Participant | null>(null);
+  const baseRef = useRef("");
+  /** Запись действительно началась: нужно, чтобы поймать остановку по тишине. */
+  const startedRef = useRef(false);
 
-  function commit(side: Participant) {
-    const merged = [drafts[side], transcript].filter(Boolean).join(" ").trim();
-    const updated = { ...drafts, [side]: merged };
+  // Распознанный текст сразу становится ответом. Раньше он жил только в
+  // выводе поля и переносился в состояние при остановке микрофона — а
+  // остановка в Chrome на Android не всегда доходит до конца, и ответ
+  // оставался пустым для кнопки «Далее».
+  useEffect(() => {
+    const side = activeRef.current;
+    if (!side || !transcript) return;
 
-    setDrafts(updated);
-    resetTranscript();
-    onChange({ she: updated.she.trim(), he: updated.he.trim() });
-  }
+    setDrafts((prev) => {
+      const merged = join(baseRef.current, transcript);
+      return prev[side] === merged ? prev : { ...prev, [side]: merged };
+    });
+  }, [transcript]);
 
-  async function stopMic(side: Participant) {
-    try {
-      await SpeechRecognition.stopListening();
-    } catch {
-      // Остановка уже произошла — состояние всё равно фиксируем.
-    }
-    commit(side);
-    setRecording(null);
-  }
+  // Пропс пересоздаётся на каждый рендер родителя, поэтому храним его в ref:
+  // иначе эффект сохранения перезапускался бы без изменения ответа.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
 
-  async function toggleMic(side: Participant) {
-    if (recording === side) {
-      await stopMic(side);
+  const savedRef = useRef<AnswerPair>({
+    she: initial.she.trim(),
+    he: initial.he.trim(),
+  });
+
+  // Любое изменение ответа — с клавиатуры или с голоса — уходит в хранилище.
+  useEffect(() => {
+    const next = { she: drafts.she.trim(), he: drafts.he.trim() };
+    if (next.she === savedRef.current.she && next.he === savedRef.current.he) {
       return;
     }
 
-    if (recording) await stopMic(recording);
+    savedRef.current = next;
+    onChangeRef.current(next);
+  }, [drafts]);
 
+  // Chrome на Android не умеет непрерывное распознавание и останавливается
+  // сам после паузы. Возвращаем кнопке обычный вид, чтобы диктовку можно было
+  // продолжить нажатием. Текст при этом уже в ответе.
+  useEffect(() => {
+    if (!recording) {
+      startedRef.current = false;
+      return;
+    }
+
+    if (listening) {
+      startedRef.current = true;
+      return;
+    }
+
+    if (startedRef.current) setRecording(null);
+  }, [recording, listening]);
+
+  /**
+   * Остановка записи. Ответа браузера не ждём: `stopListening` и
+   * `abortListening` в react-speech-recognition ждут события `end`, которого
+   * уже не будет, если распознавание закончилось само — такой `await`
+   * зависает навсегда и вместе с ним зависает переход к следующему шагу.
+   */
+  function stopMic() {
+    activeRef.current = null;
+    startedRef.current = false;
+    setRecording(null);
+    void SpeechRecognition.abortListening();
+    resetTranscript();
+  }
+
+  async function startMic(side: Participant) {
     if (!voiceEnabled) return;
 
     if (!browserSupportsSpeechRecognition) {
@@ -126,47 +179,43 @@ export function QuestionStep({
     }
 
     setError(null);
-    resetTranscript();
+    activeRef.current = side;
+    baseRef.current = drafts[side];
+    startedRef.current = false;
     setRecording(side);
+    resetTranscript();
 
     try {
       await SpeechRecognition.startListening({
         continuous: browserSupportsContinuousListening,
-        interimResults: true,
         language: RECOGNITION_LANG[locale],
       });
     } catch {
+      activeRef.current = null;
       setRecording(null);
       setError("failed");
     }
   }
 
-  function handleType(side: Participant, value: string) {
-    // Ручной ввод перебивает запись: то, что в поле, и становится ответом.
+  function toggleMic(side: Participant) {
     if (recording === side) {
-      void SpeechRecognition.stopListening();
-      resetTranscript();
-      setRecording(null);
+      stopMic();
+      return;
     }
 
-    const updated = { ...drafts, [side]: value };
+    if (recording || activeRef.current) stopMic();
+    void startMic(side);
+  }
 
-    setDrafts(updated);
-    onChange({ she: updated.she.trim(), he: updated.he.trim() });
+  function handleType(side: Participant, value: string) {
+    // Ручной ввод перебивает запись: то, что в поле, и становится ответом.
+    if (activeRef.current === side || recording === side) stopMic();
+
+    setDrafts((prev) => ({ ...prev, [side]: value }));
   }
 
   function collect(): AnswerPair {
-    return { she: shown("she").trim(), he: shown("he").trim() };
-  }
-
-  async function leave() {
-    if (recording) {
-      try {
-        await SpeechRecognition.stopListening();
-      } catch {
-        // Не мешаем переходу к следующему шагу.
-      }
-    }
+    return { she: drafts.she.trim(), he: drafts.he.trim() };
   }
 
   const effectiveError: MicError | null =
@@ -198,8 +247,8 @@ export function QuestionStep({
       <div className="flex shrink-0 items-center justify-between gap-3">
         <button
           type="button"
-          onClick={async () => {
-            await leave();
+          onClick={() => {
+            stopMic();
             onBack(collect());
           }}
           className="shadow-block rounded-full bg-white px-3.5 py-1.5 text-xs font-extrabold text-ink transition-colors hover:text-pink-600"
@@ -260,13 +309,13 @@ export function QuestionStep({
           side="she"
           title={texts.turnShe}
           avatar="/woman.png"
-          value={shown("she")}
+          value={drafts.she}
           placeholder={`${texts.examplePrefix} ${question.exampleShe}`}
           onChange={(value) => handleType("she", value)}
           listening={recording === "she" && listening}
           blocked={Boolean(effectiveError)}
           voiceEnabled={voiceEnabled}
-          onToggleMic={() => void toggleMic("she")}
+          onToggleMic={() => toggleMic("she")}
           caption={caption("she")}
           micLabel={
             recording === "she" && listening ? texts.micStop : texts.micStart
@@ -276,13 +325,13 @@ export function QuestionStep({
           side="he"
           title={texts.turnHe}
           avatar="/man.png"
-          value={shown("he")}
+          value={drafts.he}
           placeholder={`${texts.examplePrefix} ${question.exampleHe}`}
           onChange={(value) => handleType("he", value)}
           listening={recording === "he" && listening}
           blocked={Boolean(effectiveError)}
           voiceEnabled={voiceEnabled}
-          onToggleMic={() => void toggleMic("he")}
+          onToggleMic={() => toggleMic("he")}
           caption={caption("he")}
           micLabel={
             recording === "he" && listening ? texts.micStop : texts.micStart
@@ -295,10 +344,8 @@ export function QuestionStep({
         hint={texts.hint}
         disabled={!ready}
         onClick={() => {
-          void (async () => {
-            await leave();
-            onSubmit(collect());
-          })();
+          stopMic();
+          onSubmit(collect());
         }}
       />
     </div>
