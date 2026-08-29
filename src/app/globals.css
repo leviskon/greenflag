@@ -40,6 +40,55 @@
   --animate-bar: bar 0.9s ease-in-out infinite;
 }
 
+/* Лоадер разбора: сфера из колец. Наклон и задержку каждому кольцу
+   выставляет разметка (см. OrbitLoader), здесь — общий вид и вращение.
+   Перспективы намеренно нет: кольца сплющиваются в эллипсы, за счёт этого и
+   читается объём. */
+.orbit-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.9px solid;
+  border-radius: 50%;
+  border-top-color: rgba(248, 67, 143, 0.55);
+  border-right-color: rgba(248, 67, 143, 0.55);
+  border-bottom-color: rgba(151, 93, 193, 0.55);
+  border-left-color: rgba(151, 93, 193, 0.55);
+  transform-style: preserve-3d;
+
+  /* Кольцо ждёт свою задержку невидимым: в кадрах анимации opacity уже 1. */
+  opacity: 0;
+}
+
+.orbit-ring--a {
+  animation: orbit-a 2s linear infinite;
+}
+
+.orbit-ring--b {
+  animation: orbit-b 3s linear infinite;
+}
+
+@keyframes orbit-a {
+  from {
+    opacity: 1;
+    transform: rotate3d(0, 1, 1, 360deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate3d(0, 1, 1, 0deg);
+  }
+}
+
+@keyframes orbit-b {
+  from {
+    opacity: 1;
+    transform: rotate3d(1, 0, 1, 0deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate3d(1, 0, 1, 360deg);
+  }
+}
+
 /* Индикатор записи голоса. */
 @keyframes bar {
   0%,
