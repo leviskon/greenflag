@@ -25,6 +25,7 @@ import {
   type TestState,
 } from "@/lib/storage";
 import { AnalyzingStep } from "./analyzing-step";
+import { illustrationQueue, warmIllustrations } from "./illustrations";
 import { ProfileStep } from "./profile-step";
 import { QuestionStep } from "./question-step";
 import { ChoiceStep } from "./choice-step";
@@ -101,6 +102,14 @@ export function TestFlow({
     readServerState,
   );
   const stored = useMemo<TestState | null>(() => parseState(raw), [raw]);
+
+  // Картинки вопросов тянем сразу, как открыли тест, в порядке прохождения.
+  // Без этого запрос уходит только в момент показа вопроса: сервер пережимает
+  // исходный PNG, браузер его качает — и шаг секунду стоит без картинки.
+  useEffect(
+    () => warmIllustrations(illustrationQueue(questions.map((q) => q.id))),
+    [questions],
+  );
 
   const languageControl = (
     <TestHeader

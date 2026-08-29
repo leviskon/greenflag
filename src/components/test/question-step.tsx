@@ -9,6 +9,7 @@ import { cn } from "@/components/ui";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
 import type { AnswerPair, Participant } from "@/lib/storage";
+import { ILLUSTRATION_SIZES, ILLUSTRATIONS } from "./illustrations";
 import { StepFooter } from "./step-footer";
 import { VoiceAnswer } from "./voice-answer";
 
@@ -24,19 +25,6 @@ type MicError = "unsupported" | "insecure" | "denied" | "failed";
 const RECOGNITION_LANG: Record<Locale, string> = {
   ru: "ru-RU",
   ky: "ru-RU",
-};
-
-/** Картинка к вопросу, если она есть. Номера файлов — номера вопросов. */
-const ILLUSTRATIONS: Record<string, string> = {
-  peace: "/sorry.png",
-  critique: "/critique.png",
-  lastday: "/lastday.png",
-  disagree: "/5.png",
-  "change-behavior": "/6.png",
-  stranger: "/8.png",
-  annoy: "/9.png",
-  value: "/10.png",
-  jealousy: "/11.png",
 };
 
 /** Склейка «уже набранное + распознанное» без лишних пробелов. */
@@ -288,7 +276,11 @@ export function QuestionStep({
         </h1>
 
         {/* Через next/image, иначе телефон тянет исходные PNG
-            по 1–1,5 МБ и вкладка может перезагрузиться. */}
+            по 1–1,5 МБ и вкладка может перезагрузиться.
+
+            Картинка на экране с первого кадра шага: eager убирает ожидание
+            расчёта видимости, sync — декодирование в отдельном кадре. К этому
+            моменту она обычно уже в кэше (см. warmIllustrations). */}
         {illustration ? (
           <Image
             src={illustration}
@@ -296,7 +288,9 @@ export function QuestionStep({
             aria-hidden
             width={1024}
             height={1024}
-            sizes="(max-width: 640px) 128px, (max-width: 1024px) 176px, 208px"
+            sizes={ILLUSTRATION_SIZES}
+            loading="eager"
+            decoding="sync"
             className="h-auto w-32 shrink-0 sm:w-44 lg:w-52"
           />
         ) : null}
