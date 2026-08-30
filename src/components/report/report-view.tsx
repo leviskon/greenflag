@@ -24,7 +24,7 @@ import {
   subscribeToState,
 } from "@/lib/storage";
 import { guardAnalysis } from "@/lib/ai/analysis";
-import { Bar, Donut, LockedBlock, ReportBlock, TONE_TEXT } from "./report-ui";
+import { Bar, Donut, NoteCard, ReportBlock, TONE_TEXT } from "./report-ui";
 
 /**
  * Признак «мы уже в браузере»: на сервере и при гидрации false, дальше true.
@@ -34,9 +34,6 @@ import { Bar, Donut, LockedBlock, ReportBlock, TONE_TEXT } from "./report-ui";
 const neverChanges = () => () => {};
 const onClient = () => true;
 const onServer = () => false;
-
-/** Какие блоки показываем закрытыми: тексты берём из словаря лендинга. */
-const LOCKED_IDS = ["cheating", "dates", "fun"] as const;
 
 /** Корень отчёта: по нему сборщик PDF находит блоки. */
 const REPORT_ROOT_ID = "report-root";
@@ -193,9 +190,10 @@ export function ReportView({
       {header}
 
       {/* id — корень для сборки PDF: из него берутся блоки с data-pdf-block. */}
+      {/* reveal: блоки появляются по очереди сверху вниз — см. globals.css. */}
       <main
         id={REPORT_ROOT_ID}
-        className="print-body mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-10 sm:px-6"
+        className="print-body reveal mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-10 sm:px-6"
       >
         {/* Шапка отчёта: заголовок и подводка, картинка задаёт высоту блока */}
         <section
@@ -259,20 +257,24 @@ export function ReportView({
           slides={[
             {
               title: t.portrait.archetypeTitle,
-              name: dict.reportPage.archetypes[report.archetype].name,
-              text: dict.reportPage.archetypes[report.archetype].text,
+              name: t.archetypes[report.archetype].name,
+              // Текст пишет модель — про эту пару. Описание метки из словаря
+              // остаётся запасным: оно одинаковое у всех, кому она досталась.
+              text:
+                report.portrait.archetype ??
+                t.archetypes[report.archetype].text,
               art: ARCHETYPE_ART[report.archetype],
             },
             {
               title: t.portrait.powerTitle,
-              name: dict.reportPage.powers[report.power].name,
-              text: dict.reportPage.powers[report.power].text,
+              name: t.powers[report.power].name,
+              text: report.portrait.power ?? t.powers[report.power].text,
               art: POWER_ART[report.power],
             },
             {
               title: t.portrait.riskTitle,
-              name: dict.reportPage.riskZones[report.risk].name,
-              text: dict.reportPage.riskZones[report.risk].text,
+              name: t.riskZones[report.risk].name,
+              text: report.portrait.risk ?? t.riskZones[report.risk].text,
               art: RISK_ART[report.risk],
             },
           ]}
@@ -418,20 +420,67 @@ export function ReportView({
           </div>
         </ReportBlock>
 
-        {/* Закрытые блоки */}
-        <h2 className="mt-4 text-center text-lg font-extrabold sm:text-xl">
-          {t.locked.title}
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {LOCKED_IDS.map((id) => (
-            <LockedBlock
-              key={id}
-              tag={t.locked.tag}
-              title={dict.report.blocks[id].title}
-              placeholder={t.locked.placeholder}
-            />
-          ))}
-        </div>
+        {/* 8. Вероятность измены */}
+        <ReportBlock n={8} title={dict.report.blocks.cheating.title}>
+          <p
+            className={cn(
+              "font-display text-4xl leading-none font-extrabold",
+              TONE_TEXT[report.cheating.tone],
+            )}
+          >
+            {report.cheating.value}%
+          </p>
+
+          <div className="mt-3">
+            <Bar value={report.cheating.value} tone={report.cheating.tone} />
+          </div>
+
+          {report.cheating.note ? (
+            <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
+              {report.cheating.note}
+            </p>
+          ) : null}
+        </ReportBlock>
+
+        {/* 9. Идеи для свиданий. Их придумывает модель, поэтому без разбора
+            блока нет: подставлять общие советы вместо разбора нечестно. */}
+        {report.dates.length > 0 ? (
+          <ReportBlock n={9} title={dict.report.blocks.dates.title}>
+            <ol className="flex flex-col gap-2">
+              {report.dates.map((idea, index) => (
+                <li
+                  key={index}
+                  className="flex items-start gap-2.5 rounded-2xl bg-canvas p-3"
+                >
+                  <span
+                    aria-hidden
+                    className="grid size-5 shrink-0 place-items-center rounded-full bg-pink-100 text-[10px] font-extrabold text-pink-600"
+                  >
+                    {index + 1}
+                  </span>
+                  <p className="text-[12px] leading-snug sm:text-[13px]">
+                    {idea}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </ReportBlock>
+        ) : null}
+
+        {/* 10. Фильм, мем и мультфильм — тоже только с разбором. Номер
+            подстраивается, чтобы в отчёте не было пропущенного. */}
+        {report.fun ? (
+          <ReportBlock
+            n={report.dates.length > 0 ? 10 : 9}
+            title={dict.report.blocks.fun.title}
+          >
+            <div className="grid gap-2 sm:grid-cols-3">
+              <NoteCard label={t.fun.film} text={report.fun.film} />
+              <NoteCard label={t.fun.meme} text={report.fun.meme} />
+              <NoteCard label={t.fun.cartoon} text={report.fun.cartoon} />
+            </div>
+          </ReportBlock>
+        ) : null}
 
         {/* Единственный выход обратно в тест: со заполненными ответами
             страница теста сама возвращает в отчёт, поэтому пройти заново

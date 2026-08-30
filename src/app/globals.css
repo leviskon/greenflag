@@ -40,6 +40,60 @@
   --animate-bar: bar 0.9s ease-in-out infinite;
 }
 
+/* Появление отчёта: блоки выезжают по очереди, а не все стопкой сразу.
+   Задержка на nth-child, а не переменной у каждого блока: список блоков
+   меняется (часть есть только с разбором модели), и разметка не должна знать
+   свой номер в очереди. С двенадцатого блока задержку не наращиваем — иначе
+   низ отчёта ждал бы своей очереди дольше, чем пара до него доскроллит. */
+.reveal > * {
+  animation: reveal-in 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.reveal > *:nth-child(2) {
+  animation-delay: 70ms;
+}
+.reveal > *:nth-child(3) {
+  animation-delay: 140ms;
+}
+.reveal > *:nth-child(4) {
+  animation-delay: 210ms;
+}
+.reveal > *:nth-child(5) {
+  animation-delay: 280ms;
+}
+.reveal > *:nth-child(6) {
+  animation-delay: 350ms;
+}
+.reveal > *:nth-child(7) {
+  animation-delay: 420ms;
+}
+.reveal > *:nth-child(8) {
+  animation-delay: 490ms;
+}
+.reveal > *:nth-child(9) {
+  animation-delay: 560ms;
+}
+.reveal > *:nth-child(10) {
+  animation-delay: 630ms;
+}
+.reveal > *:nth-child(11) {
+  animation-delay: 700ms;
+}
+.reveal > *:nth-child(n + 12) {
+  animation-delay: 770ms;
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Лоадер разбора: сфера из колец. Наклон и задержку каждому кольцу
    выставляет разметка (см. OrbitLoader), здесь — общий вид и вращение.
    Перспективы намеренно нет: кольца сплющиваются в эллипсы, за счёт этого и
@@ -216,6 +270,12 @@
 
   [class*="sticky"] {
     position: static !important;
+  }
+
+  /* Появление блоков на бумаге не нужно: html2canvas и принтер могут снять
+     кадр до конца анимации и увести блок наполовину прозрачным. */
+  .reveal > * {
+    animation: none !important;
   }
 
   /* Экранная обёртка отчёта: на бумаге ни высота экрана, ни центрирование

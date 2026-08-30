@@ -139,71 +139,14 @@ export function Bar({ value, tone }: { value: number; tone: Tone }) {
   );
 }
 
-/**
- * Заблокированный блок: настоящий текст появится в полной версии, поэтому
- * показываем заглушку под размытием. В печати размытие убираем — принтеры и
- * PDF рендерят backdrop-filter непредсказуемо.
- */
-export function LockedBlock({
-  tag,
-  title,
-  placeholder,
-}: {
-  tag: string;
-  title: string;
-  placeholder: string;
-}) {
+/** Подписанная карточка внутри блока: заголовок-ярлык и текст под ним. */
+export function NoteCard({ label, text }: { label: string; text: string }) {
   return (
-    // h-full: соседние карточки в ряду выравниваются по самой высокой.
-    <div className="rounded-block shadow-block avoid-break flex h-full flex-col bg-white p-4 print:shadow-none">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="min-w-0 text-sm font-extrabold text-balance sm:text-base">
-          {title}
-        </h3>
-        <span className="shrink-0 rounded-full border border-dashed border-ink-muted/50 px-2 py-0.5 text-[10px] font-extrabold tracking-[0.06em] text-ink-muted uppercase">
-          {tag}
-        </span>
-      </div>
-
-      {/* Размытие накрывает только заглушку. Раньше оно шло от фиксированного
-          отступа сверху и заезжало на заголовок, когда тот вставал в две строки. */}
-      <div className="relative mt-3 flex min-h-28 flex-1 items-center overflow-hidden rounded-2xl bg-canvas p-3">
-        <p
-          aria-hidden
-          className="text-[12px] leading-snug text-ink opacity-40"
-        >
-          {placeholder}
-        </p>
-
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-white/30 backdrop-blur-[2px] print:bg-white/75 print:backdrop-blur-none"
-        />
-
-        <span
-          aria-hidden
-          className="absolute inset-0 grid place-items-center text-ink-muted"
-        >
-          <LockIcon />
-        </span>
-      </div>
+    <div className="avoid-break flex flex-col gap-1 rounded-2xl bg-canvas p-3">
+      <span className="text-[10px] font-extrabold tracking-[0.06em] text-pink-600 uppercase">
+        {label}
+      </span>
+      <p className="text-[12px] leading-snug sm:text-[13px]">{text}</p>
     </div>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      className="size-5 shrink-0"
-      aria-hidden
-    >
-      <rect x="4" y="10" width="16" height="10" rx="2.5" fill="currentColor" stroke="none" />
-      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-    </svg>
   );
 }

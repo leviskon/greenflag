@@ -57,6 +57,15 @@ const MAX_PCT = 99;
 const MAX_SUMMARY = 220;
 const MAX_NOTE = 170;
 
+/** Текст к архетипу, силе и риску. В промпте просим до 200. */
+const MAX_PORTRAIT = 260;
+
+/** Строка списка: идея для свидания, фильм, мем. В промпте просим до 90. */
+const MAX_LINE = 130;
+
+/** Больше пяти идей для свиданий блок не показывает. */
+const MAX_DATES = 5;
+
 export type Analysis = {
   archetype: ArchetypeId;
   power: PowerId;
@@ -67,8 +76,25 @@ export type Analysis = {
   battle: Partial<Record<BattleId, number>>;
   abuser: AbuserVerdict | null;
   fight: number | null;
+  /** Вероятность измены. Без неё в отчёте останется число из формулы. */
+  cheating: number | null;
   summary: string;
   abuserNote: string;
+  cheatingNote: string;
+  /**
+   * Тексты к выбранным метке архетипа, силы и риска.
+   *
+   * Каждый годится только вместе со своей меткой: если отчёт заменит метку
+   * своей (модель предложила несочетаемую пару «сила + риск»), текст к ней уже
+   * не относится и в отчёт не попадёт.
+   */
+  archetypeText: string;
+  powerText: string;
+  riskText: string;
+  /** Идеи для свиданий: формулой их не соберёшь, только модель. */
+  dates: string[];
+  /** Фильм, мем и мультфильм про пару. Тоже только от модели. */
+  fun: { film: string; meme: string; cartoon: string } | null;
 };
 
 /** Целое в разумных границах или null, если пришёл мусор. */
@@ -117,6 +143,32 @@ function text(value: unknown, limit: number): string {
   return `${words.trim().replace(/[\s,;:.—–-]+$/u, "")}…`;
 }
 
+/** Список коротких строк: пустые отбрасываем, лишние отрезаем. */
+function linesOf(value: unknown, limit: number, max: number): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => text(item, limit))
+    .filter((item) => item.length > 0)
+    .slice(0, max);
+}
+
+/**
+ * Фильм, мем и мультфильм. Нужны все три: блок из одной заполненной строки
+ * выглядит как сбой, а не как часть отчёта.
+ */
+function funOf(value: unknown): Analysis["fun"] {
+  if (typeof value !== "object" || value === null) return null;
+
+  const raw = value as Record<string, unknown>;
+
+  const film = text(raw.film, MAX_LINE);
+  const meme = text(raw.meme, MAX_LINE);
+  const cartoon = text(raw.cartoon, MAX_LINE);
+
+  return film && meme && cartoon ? { film, meme, cartoon } : null;
+}
+
 function numbersOf<Key extends string>(
   value: unknown,
   keys: readonly Key[],
@@ -163,8 +215,15 @@ export function parseAnalysis(value: unknown): Analysis | null {
     battle: numbersOf(raw.b, BATTLE_KEYS),
     abuser,
     fight: percent(raw.f),
+    cheating: percent(raw.ch),
     summary: text(raw.s, MAX_SUMMARY),
     abuserNote: text(raw.an, MAX_NOTE),
+    cheatingNote: text(raw.chn, MAX_NOTE),
+    archetypeText: text(raw.at, MAX_PORTRAIT),
+    powerText: text(raw.pt, MAX_PORTRAIT),
+    riskText: text(raw.rt, MAX_PORTRAIT),
+    dates: linesOf(raw.d, MAX_LINE, MAX_DATES),
+    fun: funOf(raw.fu),
   };
 }
 
@@ -195,8 +254,15 @@ export function guardAnalysis(value: unknown): Analysis | null {
     battle: numbersOf(raw.battle, BATTLE_KEYS),
     abuser: ABUSER_VALUES.find((item) => item === raw.abuser) ?? null,
     fight: percent(raw.fight),
+    cheating: percent(raw.cheating),
     summary: text(raw.summary, MAX_SUMMARY),
     abuserNote: text(raw.abuserNote, MAX_NOTE),
+    cheatingNote: text(raw.cheatingNote, MAX_NOTE),
+    archetypeText: text(raw.archetypeText, MAX_PORTRAIT),
+    powerText: text(raw.powerText, MAX_PORTRAIT),
+    riskText: text(raw.riskText, MAX_PORTRAIT),
+    dates: linesOf(raw.dates, MAX_LINE, MAX_DATES),
+    fun: funOf(raw.fun),
   };
 }
 

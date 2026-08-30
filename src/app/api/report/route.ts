@@ -42,15 +42,36 @@ function tooManyRequests(ip: string): boolean {
   return fresh.length > RATE_LIMIT;
 }
 
+/**
+ * Запрос пришёл со стороннего сайта.
+ *
+ * Хост, на который пришёл запрос, берём из заголовков, а не из `request.url`:
+ * там оказывается адрес, по которому Next обращается сам к себе (localhost), а
+ * браузер присылает в Origin то, что стоит в адресной строке — например
+ * 192.168.1.10:3000 с телефона в той же сети. Из-за этого свой же запрос
+ * выглядел чужим, отдавался 403, и отчёт молча считался формулами.
+ *
+ * Протокол не сверяем: за прокси снаружи https, а внутрь приходит http.
+ * Если хост не пришёл, ведём себя как при отсутствии Origin — пропускаем.
+ */
 function wrongOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
 
+  const host =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!host) return false;
+
   try {
-    return new URL(origin).origin !== new URL(request.url).origin;
+    if (new URL(origin).host === host) return false;
   } catch {
     return true;
   }
+
+  // Причину видно в логе: иначе отказ выглядит как молчаливый сбой разбора.
+  console.warn(`[report] origin ${origin} не совпал с хостом ${host}`);
+
+  return true;
 }
 
 function fail(reason: string, status = 200) {

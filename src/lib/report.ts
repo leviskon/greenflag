@@ -139,6 +139,15 @@ export type Report = {
   summary: string | null;
   /** Комментарий к вердикту про контроль. Без модели берётся из словаря. */
   abuserNote: string | null;
+  /**
+   * Тексты слайдов портрета. null у любого из трёх — показываем описание метки
+   * из словаря: либо модель не ответила, либо её метку пришлось пересчитать.
+   */
+  portrait: {
+    archetype: string | null;
+    power: string | null;
+    risk: string | null;
+  };
   names: { she: string; he: string };
   since: string;
   answered: number;
@@ -155,6 +164,12 @@ export type Report = {
   scale: { rows: ScaleRow[]; matches: ScaleRow[]; clashes: ScaleRow[] };
   blitz: BlitzRow[];
   risks: { fight: number; breakup: number };
+  /** Вероятность измены. Число есть всегда, объяснение — только от модели. */
+  cheating: { value: number; tone: Tone; note: string | null };
+  /** Идеи для свиданий. Пусто, если разбора нет: формулой их не придумать. */
+  dates: string[];
+  /** Фильм, мем и мультфильм про пару. Без разбора null. */
+  fun: { film: string; meme: string; cartoon: string } | null;
 };
 
 const METRIC_ORDER: MetricId[] = [
@@ -1069,8 +1084,16 @@ export function buildReport(
     clashShare,
   );
 
+  /*
+   * Метки модели держим отдельно от итоговых: её текст к архетипу, силе и риску
+   * годится только там, где мы взяли и саму метку. Если метку пришлось
+   * пересчитать, текст описывает уже не то, что стоит в отчёте, — тогда в дело
+   * идёт описание из словаря.
+   */
+  const modelArchetype = analysis?.archetype ?? null;
+
   const archetype =
-    analysis?.archetype ??
+    modelArchetype ??
     pickBest(ARCHETYPE_RULES, ARCHETYPE_IDS, signals, state, "archetype");
 
   const match = ARCHETYPE_MATCH[archetype];
@@ -1083,17 +1106,20 @@ export function buildReport(
    * почти наугад, потому что выбрать надо, а хвалить пару не за что. Поэтому
    * при противоречии сохраняем риск и пересчитываем силу.
    */
+  const modelRisk =
+    analysis && match.risks.includes(analysis.risk) ? analysis.risk : null;
+
   const risk =
-    analysis && match.risks.includes(analysis.risk)
-      ? analysis.risk
-      : pickBest(RISK_RULES, match.risks, signals, state, "risk");
+    modelRisk ?? pickBest(RISK_RULES, match.risks, signals, state, "risk");
 
   const allowedPowers = powersFor(risk, match.powers);
 
+  const modelPower =
+    analysis && allowedPowers.includes(analysis.power) ? analysis.power : null;
+
   const power =
-    analysis && allowedPowers.includes(analysis.power)
-      ? analysis.power
-      : pickBest(POWER_RULES, allowedPowers, signals, state, "power");
+    modelPower ??
+    pickBest(POWER_RULES, allowedPowers, signals, state, "power");
 
   const matches = [...scaleRows]
     .filter((row) => row.kind !== "clash")
@@ -1126,11 +1152,37 @@ export function buildReport(
     value: analysis?.battle[round.id] ?? round.value,
   }));
 
+  /*
+   * Вероятность измены держится на доверии и на том, сколько накопилось
+   * раздражения: уходят не от совпадения ценностей, а от ощущения, что дома
+   * ничего не осталось.
+   *
+   * Диапазон уже, чем у метрик, и намеренно: «84% измены» по опроснику —
+   * обещание, которого никакие ответы не выдержат.
+   */
+  const cheating =
+    analysis?.cheating ??
+    toPercent(
+      mix([
+        [1 - rawMetrics.trust, 0.4],
+        [1 - rawMetrics.sex, 0.15],
+        [rawMetrics.irritation, 0.2],
+        [rawMetrics.toxicity, 0.25],
+      ]),
+      12,
+      74,
+    );
+
   return {
     hasData,
     source: analysis ? "ai" : "template",
     summary: analysis?.summary || null,
     abuserNote: analysis?.abuserNote || null,
+    portrait: {
+      archetype: (modelArchetype && analysis?.archetypeText) || null,
+      power: (modelPower && analysis?.powerText) || null,
+      risk: (modelRisk && analysis?.riskText) || null,
+    },
     names: { she: state.profile.she.name, he: state.profile.he.name },
     since: state.profile.since,
     answered,
@@ -1159,6 +1211,13 @@ export function buildReport(
       // расстанемся» рядом не встанут.
       breakup: clamp(105 - compatibility, 15, 80),
     },
+    cheating: {
+      value: cheating,
+      tone: cheating >= 60 ? "bad" : cheating >= 35 ? "mid" : "good",
+      note: analysis?.cheatingNote || null,
+    },
+    dates: analysis?.dates ?? [],
+    fun: analysis?.fun ?? null,
   };
 }
 
