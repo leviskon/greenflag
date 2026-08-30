@@ -6,7 +6,12 @@
  * нельзя, иначе полный отчёт можно было бы купить за сом.
  */
 
-import { createFinikPayment, finikConfigError } from "@/lib/finik";
+import {
+  createFinikPayment,
+  finikConfigError,
+  FinikError,
+  privateKeyFingerprint,
+} from "@/lib/finik";
 import { isId, REPORT_PRICE } from "@/lib/paywall/plan";
 import { isReachable, redirectUrl, webhookUrl } from "@/lib/paywall/urls";
 import {
@@ -40,8 +45,8 @@ function tooManyRequests(ip: string): boolean {
   return fresh.length > RATE_LIMIT;
 }
 
-function fail(error: string, status: number) {
-  return Response.json({ ok: false, error }, { status });
+function fail(error: string, status: number, detail?: string) {
+  return Response.json({ ok: false, error, detail }, { status });
 }
 
 export async function POST(request: Request) {
@@ -72,7 +77,7 @@ export async function POST(request: Request) {
   if (problem) {
     console.error(`[finik] оплата не настроена: ${problem}`);
 
-    return fail("not-configured", 503);
+    return fail("not-configured", 503, problem);
   }
 
   // Уже оплачено — платёж не создаём, просто говорим клиенту перечитать доступ.
@@ -121,13 +126,18 @@ export async function POST(request: Request) {
     }
 
     console.info(
-      `[finik] платёж создан: ${paymentId} | отчёт ${reportId} | ${REPORT_PRICE} KGS | хранилище ${storeKind()}`,
+      `[finik] платёж создан: ${paymentId} | отчёт ${reportId} | ${REPORT_PRICE} KGS | хранилище ${storeKind()} | ключ ${privateKeyFingerprint() ?? "нет"}`,
     );
 
     return Response.json({ ok: true, paid: false, paymentUrl });
   } catch (error) {
     console.error("[finik] не удалось создать платёж", error);
 
-    return fail("create-failed", 502);
+    // Причину отдаём клиенту: в ней нет секретов, зато без неё любая проблема
+    // выглядит как «попробуйте ещё раз» и не диагностируется.
+    const detail =
+      error instanceof FinikError ? error.detail : "неизвестная ошибка";
+
+    return fail("create-failed", 502, detail);
   }
 }

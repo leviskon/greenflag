@@ -8,6 +8,7 @@
  * платил с телефона по QR), а webhook приходит всегда.
  */
 
+import { createHash } from "node:crypto";
 import { Signer } from "@mancho.devs/authorizer";
 
 const FINIK_ENV = process.env.FINIK_ENV === "prod" ? "prod" : "beta";
@@ -22,11 +23,20 @@ const BASE_URL = `https://${HOST}`;
 /** Путь создания платежа. Он же участвует в подписи, поэтому вынесен. */
 const PAYMENT_PATH = "/v1/payment";
 
-/** Код категории торговой точки: 0742 — услуги, как в примере Finik. */
-const MERCHANT_CATEGORY_CODE = "0742";
+/**
+ * Код категории торговой точки (MCC).
+ *
+ * 0742 стоит по умолчанию, потому что он был в примере из руководства, но это
+ * код ветеринарных услуг — Finik вполне может не принять его для вашей точки.
+ * Настоящий код выдаёт Finik вместе с аккаунтом; подставляется через FINIK_MCC.
+ */
+const MERCHANT_CATEGORY_CODE = process.env.FINIK_MCC?.trim() || "0742";
 
-/** Имя, которое пара увидит в приложении банка. Только латиница. */
-const MERCHANT_NAME = "GreenFlag";
+/**
+ * Имя, которое пара увидит в приложении банка. Только латиница.
+ * Некоторые аккаунты требуют, чтобы оно совпадало с зарегистрированным.
+ */
+const MERCHANT_NAME = process.env.FINIK_MERCHANT_NAME?.trim() || "GreenFlag";
 
 /**
  * Публичные ключи Finik: ими проверяется подпись webhook.
@@ -57,14 +67,71 @@ ZwIDAQAB
 /**
  * Приватный ключ из окружения.
  *
- * В панелях хостинга многострочное значение хранить неудобно, поэтому
- * принимаем и вид с настоящими переносами, и вид с «\n» внутри одной строки.
+ * Живой ключ попадает сюда через панель хостинга, а там его портят одинаково:
+ * копируют вместе с кавычками из строки .env, вставляют с «\n» вместо
+ * переносов, теряют перенос перед END. Поэтому чиним всё это здесь, иначе
+ * единственным симптомом будет 401 от Finik без объяснений.
  */
 function privateKey(): string | null {
-  const raw = process.env.FINIK_PRIVATE_KEY?.trim();
+  let raw = process.env.FINIK_PRIVATE_KEY?.trim();
   if (!raw) return null;
 
-  return raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
+  // Скопировали значение вместе с кавычками из .env.
+  if (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    raw = raw.slice(1, -1).trim();
+  }
+
+  // Одна строка с «\n» — обычный вид для панелей хостинга.
+  if (raw.includes("\\n")) raw = raw.replace(/\\n/g, "\n");
+
+  // Переносы съел буфер обмена: тело ключа осталось, а строки склеились.
+  if (!raw.includes("\n")) raw = rewrap(raw);
+
+  return raw.endsWith("\n") ? raw : `${raw}\n`;
+}
+
+/** Собирает PEM обратно, если все переносы потерялись. */
+function rewrap(flat: string): string {
+  const match = /-----BEGIN ([A-Z ]+)-----(.*)-----END \1-----/.exec(flat);
+  if (!match) return flat;
+
+  const label = match[1];
+  const body = match[2].replace(/\s+/g, "");
+  const lines = body.match(/.{1,64}/g) ?? [];
+
+  return [`-----BEGIN ${label}-----`, ...lines, `-----END ${label}-----`].join("\n");
+}
+
+/** Понятная причина, почему ключ не годится. null — с виду всё в порядке. */
+function privateKeyProblem(key: string): string | null {
+  if (!key.includes("-----BEGIN")) {
+    return "FINIK_PRIVATE_KEY не похож на PEM: нет строки -----BEGIN … KEY-----";
+  }
+
+  if (!key.includes("-----END")) {
+    return "FINIK_PRIVATE_KEY обрезан: нет строки -----END … KEY-----";
+  }
+
+  if (key.includes("PUBLIC KEY")) {
+    return "В FINIK_PRIVATE_KEY лежит публичный ключ, нужен приватный";
+  }
+
+  return null;
+}
+
+/**
+ * Отпечаток ключа: восемь символов от SHA-256.
+ *
+ * Нужен, чтобы в логах сверить, тот ли ключ подхватился, не показывая сам ключ.
+ */
+export function privateKeyFingerprint(): string | null {
+  const key = privateKey();
+  if (!key) return null;
+
+  return createHash("sha256").update(key).digest("hex").slice(0, 8);
 }
 
 /**
@@ -109,10 +176,22 @@ export type CreatePaymentResult = {
   paymentUrl: string;
 };
 
-export function isFinikConfigured(): boolean {
-  if (!process.env.FINIK_API_KEY || !process.env.FINIK_ACCOUNT_ID) return false;
+/**
+ * Сбой на стороне Finik или подписи.
+ *
+ * `detail` — короткая причина без секретов: её видно и в логах, и в ответе
+ * маршрута. Без неё любая проблема выглядела бы одинаково («не удалось начать
+ * оплату»), и отличить неверный ключ от неверной суммы было бы нечем.
+ */
+export class FinikError extends Error {
+  readonly detail: string;
 
-  return FINIK_ENV !== "prod" || privateKey() !== null;
+  constructor(detail: string, cause?: unknown) {
+    super(detail);
+    this.name = "FinikError";
+    this.detail = detail;
+    this.cause = cause;
+  }
 }
 
 /** Понятная причина, почему оплату нельзя начать. null — всё настроено. */
@@ -120,11 +199,13 @@ export function finikConfigError(): string | null {
   if (!process.env.FINIK_API_KEY) return "FINIK_API_KEY не задан";
   if (!process.env.FINIK_ACCOUNT_ID) return "FINIK_ACCOUNT_ID не задан";
 
-  if (FINIK_ENV === "prod" && privateKey() === null) {
+  const key = privateKey();
+
+  if (FINIK_ENV === "prod" && key === null) {
     return 'FINIK_PRIVATE_KEY обязателен при FINIK_ENV="prod"';
   }
 
-  return null;
+  return key ? privateKeyProblem(key) : null;
 }
 
 /**
@@ -135,7 +216,7 @@ export async function createFinikPayment(
   input: CreatePaymentInput,
 ): Promise<CreatePaymentResult> {
   const problem = finikConfigError();
-  if (problem) throw new Error(problem);
+  if (problem) throw new FinikError(problem);
 
   const apiKey = process.env.FINIK_API_KEY as string;
   const accountId = process.env.FINIK_ACCOUNT_ID as string;
@@ -188,7 +269,8 @@ export async function createFinikPayment(
       headers.signature = await quietly(() => new Signer(signed).sign(key));
     } catch (error) {
       console.error("[finik] не удалось подписать запрос", error);
-      throw new Error("Не удалось подписать запрос к Finik");
+
+      throw new FinikError("подпись не собралась: ключ не читается", error);
     }
   }
 
@@ -205,20 +287,53 @@ export async function createFinikPayment(
     const paymentUrl = response.headers.get("location");
 
     if (!paymentUrl) {
-      throw new Error("Finik не вернул адрес платёжной страницы");
+      throw new FinikError("Finik не вернул адрес платёжной страницы");
     }
 
+    // Отказ Finik сообщает не телом ответа, а редиректом на свою страницу с
+    // status=failed. Причина лежит там же, в остальных параметрах адреса,
+    // поэтому вытаскиваем их, а не выбрасываем весь адрес.
     if (paymentUrl.includes("status=failed")) {
-      throw new Error("Finik отклонил создание платежа");
+      console.error(`[finik] отказ при создании платежа: ${paymentUrl}`);
+
+      throw new FinikError(`Finik отклонил платёж: ${reasonFrom(paymentUrl)}`);
     }
 
     return { paymentId, paymentUrl };
   }
 
-  const details = await response.text().catch(() => "");
-  console.error(`[finik] создание платежа: ${response.status} ${details}`);
+  const answer = await response.text().catch(() => "");
+  console.error(`[finik] создание платежа: ${response.status} ${answer}`);
 
-  throw new Error(`Finik ответил ${response.status}`);
+  throw new FinikError(`Finik ответил ${response.status}: ${messageFrom(answer)}`);
+}
+
+/** Причина отказа из адреса редиректа. */
+function reasonFrom(url: string): string {
+  try {
+    const params = new URL(url).searchParams;
+
+    // Названия полей у Finik не задокументированы, поэтому собираем всё, что
+    // похоже на объяснение, и отдаём как есть.
+    const parts = [...params]
+      .filter(([name]) => name.toLowerCase() !== "status")
+      .map(([name, value]) => `${name}=${value}`);
+
+    return parts.length > 0 ? parts.join(", ") : "причина не указана";
+  } catch {
+    return url;
+  }
+}
+
+/** Текст ошибки из тела ответа Finik. */
+function messageFrom(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { ErrorMessage?: string; message?: string };
+
+    return parsed.ErrorMessage ?? parsed.message ?? body.slice(0, 200);
+  } catch {
+    return body.slice(0, 200) || "без тела";
+  }
 }
 
 /** Данные, которые Finik присылает в webhook. */

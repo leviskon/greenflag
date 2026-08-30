@@ -117,9 +117,16 @@ export async function startPayment(
       paid?: boolean;
       paymentUrl?: string | null;
       error?: string;
+      detail?: string;
     };
 
     if (!response.ok || !data.ok) {
+      // Причину пишем в консоль целиком: пользователю она ни о чём не говорит,
+      // а без неё отладка сводится к чтению логов хостинга.
+      console.warn(
+        `[paywall] оплата не началась: ${data.error ?? response.status}${data.detail ? ` — ${data.detail}` : ""}`,
+      );
+
       return { kind: "error", reason: data.error ?? String(response.status) };
     }
 
