@@ -290,10 +290,7 @@ export async function createFinikPayment(
       throw new FinikError("Finik не вернул адрес платёжной страницы");
     }
 
-    // Отказ Finik сообщает не телом ответа, а редиректом на свою страницу с
-    // status=failed. Причина лежит там же, в остальных параметрах адреса,
-    // поэтому вытаскиваем их, а не выбрасываем весь адрес.
-    if (paymentUrl.includes("status=failed")) {
+    if (isRejected(paymentUrl)) {
       console.error(`[finik] отказ при создании платежа: ${paymentUrl}`);
 
       throw new FinikError(`Finik отклонил платёж: ${reasonFrom(paymentUrl)}`);
@@ -306,6 +303,29 @@ export async function createFinikPayment(
   console.error(`[finik] создание платежа: ${response.status} ${answer}`);
 
   throw new FinikError(`Finik ответил ${response.status}: ${messageFrom(answer)}`);
+}
+
+/**
+ * Finik отказал в создании платежа.
+ *
+ * Отказ выглядит как редирект на свой же `/v1/redirect` со `status=failed`.
+ * Искать эту подстроку по всему адресу нельзя: у успешного платежа тот же
+ * `status=failed` лежит внутри параметра `failure_redirect_url` — это адрес,
+ * куда Finik уйдёт, ЕСЛИ пара не оплатит. Причём вложенный адрес не закодирован,
+ * поэтому его параметры выглядят как параметры внешнего. Отличаем по пути:
+ * успешный платёж — это страница с QR-кодом на qr.finik.kg, а не /v1/redirect.
+ */
+function isRejected(url: string): boolean {
+  try {
+    const { pathname, searchParams } = new URL(url);
+
+    if (!pathname.startsWith("/v1/redirect")) return false;
+
+    return searchParams.get("status") === "failed";
+  } catch {
+    // Адрес не разобрался — считаем платёж созданным: браузер разберётся.
+    return false;
+  }
 }
 
 /** Причина отказа из адреса редиректа. */
