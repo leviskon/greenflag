@@ -17,7 +17,19 @@ const MARGIN = 28;
 const GAP = 12;
 
 /**
- * Плотность съёмки. 2 — примерно 144 dpi на A4: текст читается, файл остаётся
+ * Окно, в котором снимаем отчёт.
+ *
+ * html2canvas раскладывает копию страницы в скрытом iframe этого размера, и
+ * media-запросы считаются по нему. Размер задаём сами, чтобы файл не зависел от
+ * устройства: колонка отчёта раскрывается на свои max-w-2xl и включаются
+ * sm:-правила. С ширины телефона блоки выходили узкими и длинными — каждый
+ * занимал отдельный лист, а по бокам оставались пустые поля.
+ */
+const CAPTURE_WIDTH = 768;
+const CAPTURE_HEIGHT = 1024;
+
+/**
+ * Плотность съёмки. 2 — примерно 165 dpi на A4: текст читается, файл остаётся
  * в пределах пары мегабайт. Выше — заметно тяжелее без большой пользы.
  */
 const SCALE = 2;
@@ -30,6 +42,49 @@ export const PDF_BLOCK_ATTR = "data-pdf-block";
 
 /** Сколько ждём картинки, прежде чем собирать файл без них. */
 const IMAGES_TIMEOUT_MS = 6000;
+
+/**
+ * Стили для копии страницы.
+ *
+ * Копия живёт в iframe как обычная страница «на экране»: @media print к ней не
+ * применяется, а CSS-анимации стартуют в ней заново. Из-за этого блоки уходили
+ * в файл полупрозрачными и белыми — снимок делался, пока анимация появления
+ * (.reveal) ещё шла, а у нижних блоков она из-за задержки по nth-child даже не
+ * начиналась. Поэтому анимации и переходы гасим, а печатные правила, от которых
+ * зависит раскладка, повторяем здесь же.
+ */
+const CAPTURE_CSS = `
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Конечное состояние появления: блок виден и стоит на своём месте. */
+.reveal > * {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Кнопки, стрелки и точки карусели в файле не нужны. */
+.no-print {
+  display: none !important;
+}
+
+[class*="sticky"] {
+  position: static !important;
+}
+
+/* Слайды карусели лежат в ряду, сдвинутом трансформом: без этого в файл
+   попал бы только открытый слайд, да ещё и со смещением. */
+.print-slides {
+  display: block !important;
+  transform: none !important;
+}
+
+.print-slide {
+  width: 100% !important;
+}
+`;
 
 /**
  * Догружаем картинки отчёта.
@@ -80,23 +135,37 @@ export async function downloadReportPdf(
   let cursor = MARGIN;
   let firstOnPage = true;
 
+  /** Сколько блоков реально легло в файл: если ни один — файл не отдаём. */
+  let placed = 0;
+
   for (const block of targets) {
-    const canvas = await html2canvas(block, {
-      scale: SCALE,
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      logging: false,
-      // Кнопки и точки карусели в файле не нужны.
-      ignoreElements: (element) => element.classList.contains("no-print"),
-      onclone: (cloned) => {
-        // Слайды карусели лежат в ряду, сдвинутом трансформом: без этого в
-        // файл попал бы только открытый слайд, да ещё и со смещением.
-        cloned.querySelectorAll<HTMLElement>(".print-slides").forEach((row) => {
-          row.style.transform = "none";
-          row.style.display = "block";
-        });
-      },
-    });
+    let canvas: HTMLCanvasElement;
+
+    try {
+      canvas = await html2canvas(block, {
+        scale: SCALE,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+        // Размер окна копии — от него зависят media-запросы и вся раскладка.
+        windowWidth: CAPTURE_WIDTH,
+        windowHeight: CAPTURE_HEIGHT,
+        // Копию не прокручиваем: координаты блоков считаются от начала
+        // документа и не зависят от того, где стоит страница у пары.
+        scrollX: 0,
+        scrollY: 0,
+        ignoreElements: (element) => element.classList.contains("no-print"),
+        onclone: (cloned) => {
+          const style = cloned.createElement("style");
+          style.textContent = CAPTURE_CSS;
+          (cloned.head ?? cloned.documentElement).appendChild(style);
+        },
+      });
+    } catch (error) {
+      // Один упавший блок не должен стоить пары всего отчёта.
+      console.error("[pdf] блок не снялся", error);
+      continue;
+    }
 
     if (canvas.width === 0 || canvas.height === 0) continue;
 
@@ -123,6 +192,12 @@ export async function downloadReportPdf(
 
     cursor += height + GAP;
     firstOnPage = false;
+    placed += 1;
+  }
+
+  // Пустой файл хуже окна печати: пусть вызывающий уйдёт в window.print().
+  if (placed === 0) {
+    throw new Error("pdf: не удалось снять ни один блок отчёта");
   }
 
   doc.save(fileName);
