@@ -306,12 +306,28 @@ export function answersSignature(state: TestState): string {
   return (hash >>> 0).toString(36);
 }
 
-export function saveAnalysis(state: TestState, analysis: unknown): void {
+/** Что сервер вернул по отчёту и что нужно сохранить до его показа. */
+export type AnalysisRecord = {
+  /** Открытая часть разбора: блоки 1–3. */
+  analysis: unknown;
+  /** Номер отчёта. Нужен платежу и логам, доступ сам по себе не открывает. */
+  reportId: string | null;
+  /**
+   * Закрытая часть (блоки 4–10) в запечатанном виде. Расшифровать её может
+   * только сервер и только после подтверждённой оплаты, поэтому держать её
+   * рядом с ответами безопасно: без сервера это просто шум.
+   */
+  sealed: string | null;
+};
+
+export function saveAnalysis(state: TestState, record: AnalysisRecord): void {
   if (typeof window === "undefined") return;
 
   const serialized = JSON.stringify({
     signature: answersSignature(state),
-    analysis,
+    reportId: record.reportId,
+    sealed: record.sealed,
+    analysis: record.analysis,
   });
 
   analysisSnapshot = serialized;
@@ -336,21 +352,88 @@ export function readRawAnalysis(): string {
   }
 }
 
-/** Разбор, если он относится именно к этим ответам. Иначе null. */
-export function readAnalysisFor(
+const EMPTY_RECORD: AnalysisRecord = {
+  analysis: null,
+  reportId: null,
+  sealed: null,
+};
+
+/**
+ * Запись разбора, если она относится именно к этим ответам.
+ *
+ * Ответы поменялись — запись не подходит: числа перестанут сходиться с
+ * таблицами, которые считаются на месте, а запечатанный пакет будет от другого
+ * отчёта.
+ */
+export function readAnalysisRecord(
   raw: string | null,
   state: TestState | null,
-): unknown {
-  if (!raw || !state) return null;
+): AnalysisRecord {
+  if (!raw || !state) return EMPTY_RECORD;
 
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
+    if (typeof parsed !== "object" || parsed === null) return EMPTY_RECORD;
 
-    const stored = parsed as { signature?: unknown; analysis?: unknown };
+    const stored = parsed as {
+      signature?: unknown;
+      reportId?: unknown;
+      sealed?: unknown;
+      analysis?: unknown;
+    };
 
-    return stored.signature === answersSignature(state) ? stored.analysis : null;
+    if (stored.signature !== answersSignature(state)) return EMPTY_RECORD;
+
+    return {
+      analysis: stored.analysis ?? null,
+      reportId: typeof stored.reportId === "string" ? stored.reportId : null,
+      sealed: typeof stored.sealed === "string" ? stored.sealed : null,
+    };
   } catch {
-    return null;
+    return EMPTY_RECORD;
   }
+}
+
+/* ─── Кто эта пара ─────────────────────────────────────────────────────── */
+
+/**
+ * Ключ браузера, к которому привязана оплата.
+ *
+ * Отдельно от ответов и намеренно не удаляется при перепрохождении теста:
+ * оплата — это про человека, а не про конкретный набор ответов. Иначе правка
+ * одного ответа отбирала бы уже купленный доступ.
+ *
+ * Своей ценности ключ не имеет: сервер по нему только сверяется со списком
+ * оплат, подделать чужой доступ подстановкой чужого ключа нельзя — его нужно
+ * знать, а он нигде не публикуется.
+ */
+const CLIENT_KEY = "greenflag.client.v1";
+
+let clientSnapshot = "";
+
+export function readClientId(): string {
+  if (typeof window === "undefined") return "";
+  if (clientSnapshot) return clientSnapshot;
+
+  try {
+    const saved = window.localStorage.getItem(CLIENT_KEY);
+
+    if (saved) {
+      clientSnapshot = saved;
+
+      return saved;
+    }
+  } catch {
+    // Хранилище недоступно — ключ проживёт в памяти до перезагрузки страницы.
+  }
+
+  clientSnapshot = crypto.randomUUID();
+
+  try {
+    window.localStorage.setItem(CLIENT_KEY, clientSnapshot);
+  } catch {
+    // Приватный режим: оплата сработает, но до закрытия вкладки.
+  }
+
+  return clientSnapshot;
 }

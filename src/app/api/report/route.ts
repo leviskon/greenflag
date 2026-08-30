@@ -1,7 +1,12 @@
 /**
- * Разбор отчёта нейросетью.
+ * Разбор отчёта нейросетью и раздача его открытой части.
  *
- * Клиент присылает состояние теста, сервер отдаёт проверенные метки и числа.
+ * Клиент присылает состояние теста, сервер отдаёт проверенные метки и числа —
+ * но только по трём бесплатным блокам. Закрытая часть (блоки 4–10) считается
+ * здесь же и уходит клиенту запечатанной: расшифровать её может только сервер
+ * и только после подтверждённой оплаты. Поэтому до оплаты в браузере нет ни
+ * текстов, ни чисел — ни в ответе, ни в localStorage, ни в devtools.
+ *
  * Ключ провайдера остаётся здесь: в браузер он не уходит ни в каком виде.
  *
  * Внимание: маршрут открытый — авторизации у приложения нет, а каждый вызов
@@ -14,8 +19,25 @@
 import { hasAiKey, requestAnalysis } from "@/lib/ai/client";
 import { buildSystemPrompt, buildUserPrompt } from "@/lib/ai/prompt";
 import { getDictionary } from "@/lib/i18n/dictionary";
+import {
+  freeAnalysis,
+  isId,
+  lockedFrom,
+  REPORT_CURRENCY,
+  REPORT_PRICE,
+  type AccessPayload,
+} from "@/lib/paywall/plan";
+import { seal } from "@/lib/paywall/seal";
+import { isPaid, StoreUnavailableError } from "@/lib/paywall/store";
 import { buildReport } from "@/lib/report";
 import { parseStateValue } from "@/lib/storage";
+
+/**
+ * Разбор у модели занимает 10–20 секунд, а по умолчанию функция на Vercel
+ * живёт 10–15 секунд и обрывается на середине. Ставим запас: 60 секунд
+ * разрешены на всех тарифах, включая бесплатный.
+ */
+export const maxDuration = 60;
 
 /** Ответы пары — это текст, 64 КБ хватает с запасом. */
 const MAX_BODY = 64 * 1024;
@@ -80,7 +102,6 @@ function fail(reason: string, status = 200) {
 
 export async function POST(request: Request) {
   if (wrongOrigin(request)) return fail("bad-origin", 403);
-  if (!hasAiKey()) return fail("no-key");
 
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
@@ -96,8 +117,15 @@ export async function POST(request: Request) {
     return fail("bad-body", 400);
   }
 
-  const state = parseStateValue((parsed as { state?: unknown })?.state);
+  const payload = parsed as { state?: unknown; clientId?: unknown };
+
+  const state = parseStateValue(payload.state);
   if (!state) return fail("bad-state", 400);
+
+  // Идентификатор пары нужен, чтобы связать оплату с браузером: он же уходит в
+  // metadata платежа, приходит обратно в webhook и запечатывается в отчёт.
+  if (!isId(payload.clientId)) return fail("bad-client", 400);
+  const clientId = payload.clientId;
 
   const dict = await getDictionary(state.locale);
 
@@ -106,20 +134,66 @@ export async function POST(request: Request) {
   const baseline = buildReport(state, dict.quiz);
   if (!baseline.hasData) return fail("no-answers", 400);
 
-  const result = await requestAnalysis(
-    buildSystemPrompt(state.locale),
-    buildUserPrompt(state, dict.quiz, baseline),
-  );
+  // Разбор нейросети. Не получился — отчёт живёт на формулах, и платный доступ
+  // должен работать точно так же, поэтому маршрут не обрывается.
+  let analysis = null;
+  let reason: string | null = null;
 
-  if (!result.ok) {
-    console.error(`[report] ai failed: ${result.reason}`);
+  if (!hasAiKey()) {
+    reason = "no-key";
+  } else {
+    const result = await requestAnalysis(
+      buildSystemPrompt(state.locale),
+      buildUserPrompt(state, dict.quiz, baseline),
+    );
 
-    return fail(result.reason);
+    if (result.ok) {
+      analysis = result.analysis;
+
+      console.info(
+        `[report] ok: ${result.usage.input} in / ${result.usage.output} out`,
+      );
+    } else {
+      reason = result.reason;
+      console.error(`[report] ai failed: ${result.reason}`);
+    }
   }
 
-  console.info(
-    `[report] ok: ${result.usage.input} in / ${result.usage.output} out`,
-  );
+  // Полный отчёт собирается только здесь. Закрытая часть уходит клиенту
+  // запечатанной — открыть её он сам не может.
+  const full = analysis ? buildReport(state, dict.quiz, analysis) : baseline;
+  const locked = lockedFrom(full);
 
-  return Response.json({ ok: true, analysis: result.analysis });
+  const reportId = crypto.randomUUID();
+  const sealed = seal(locked, clientId);
+
+  // Пара уже платила раньше — открываем сразу, второй раз брать деньги не за что.
+  let paid = false;
+  let storeOk = true;
+
+  try {
+    paid = await isPaid(clientId);
+  } catch (error) {
+    storeOk = false;
+    console.error("[report] хранилище оплат недоступно", error);
+
+    if (!(error instanceof StoreUnavailableError)) throw error;
+  }
+
+  const access: AccessPayload = {
+    ok: storeOk,
+    paid,
+    price: REPORT_PRICE,
+    currency: REPORT_CURRENCY,
+    locked: paid ? locked : null,
+  };
+
+  return Response.json({
+    ok: true,
+    reportId,
+    analysis: analysis ? freeAnalysis(analysis) : null,
+    reason,
+    sealed,
+    access,
+  });
 }

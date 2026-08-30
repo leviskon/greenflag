@@ -3,7 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { cn } from "@/components/ui";
 import type { Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/ru";
@@ -12,18 +18,26 @@ import {
   POWER_ART,
   RISK_ART,
 } from "@/lib/content";
-import { buildReport, type FlagCount } from "@/lib/report";
+import { buildReport, type FlagCount, type Tone } from "@/lib/report";
 import { PortraitCarousel } from "./portrait-carousel";
 import {
   clearState,
   parseState,
-  readAnalysisFor,
+  readAnalysisRecord,
   readRawAnalysis,
   readRawState,
   readServerState,
   subscribeToState,
 } from "@/lib/storage";
 import { guardAnalysis } from "@/lib/ai/analysis";
+import { DEFAULT_ACCESS, fetchAccess, startPayment } from "@/lib/paywall/client";
+import type { AccessPayload } from "@/lib/paywall/plan";
+import {
+  LockedBlock,
+  PaidNote,
+  PaywallCard,
+  type PaywallStatus,
+} from "./paywall";
 import { Bar, Donut, NoteCard, ReportBlock, TONE_TEXT } from "./report-ui";
 
 /**
@@ -37,6 +51,42 @@ const onServer = () => false;
 
 /** Корень отчёта: по нему сборщик PDF находит блоки. */
 const REPORT_ROOT_ID = "report-root";
+
+/**
+ * Сколько раз спрашиваем сервер после возврата с оплаты.
+ *
+ * Доступ открывает не редирект, а webhook от Finik, и он приходит на секунду-
+ * две позже, чем браузер возвращается на страницу. Поэтому не проверяем один
+ * раз, а недолго опрашиваем — иначе пара увидела бы замки сразу после оплаты.
+ */
+const RETURN_ATTEMPTS = 12;
+const RETURN_DELAY_MS = 2500;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Цвет кольца риска: чем выше процент, тем тревожнее. */
+function toneOfRisk(value: number): Tone {
+  if (value >= 65) return "bad";
+
+  return value >= 40 ? "mid" : "good";
+}
+
+/** Пара вернулась со страницы оплаты. */
+function returnedFromPayment(): boolean {
+  if (typeof window === "undefined") return false;
+
+  return new URLSearchParams(window.location.search).get("payment") === "success";
+}
+
+/** Убираем ?payment=success, чтобы обновление страницы не начинало опрос заново. */
+function forgetPaymentQuery(): void {
+  if (typeof window === "undefined") return;
+  if (!window.location.search) return;
+
+  window.history.replaceState(null, "", window.location.pathname);
+}
 
 export function ReportView({
   dict,
@@ -64,13 +114,34 @@ export function ReportView({
     readServerState,
   );
 
-  const analysis = useMemo(
-    () => guardAnalysis(readAnalysisFor(rawAnalysis, stored)),
+  const record = useMemo(
+    () => readAnalysisRecord(rawAnalysis, stored),
     [rawAnalysis, stored],
   );
 
+  const analysis = useMemo(
+    () => guardAnalysis(record.analysis),
+    [record.analysis],
+  );
+
+  /** Номер отчёта для платежа и запечатанная закрытая часть для сервера. */
+  const { reportId, sealed } = record;
+
   const router = useRouter();
   const ready = useSyncExternalStore(neverChanges, onClient, onServer);
+
+  /**
+   * Платный доступ.
+   *
+   * `access.locked` — единственный источник блоков 4–10. До оплаты его нет, и
+   * подставить его в devtools бессмысленно: правка состояния страницы живёт до
+   * первого обновления, а с сервера данные всё равно не придут.
+   */
+  const [access, setAccess] = useState<AccessPayload>(DEFAULT_ACCESS);
+  const [status, setStatus] = useState<PaywallStatus>("idle");
+
+  /** «Оплата прошла» показываем только тому, кто прямо сейчас вернулся с неё. */
+  const [justPaid, setJustPaid] = useState(false);
 
   // Уходим на тест заново: пока идёт переход, отчёт уже пустой, поэтому
   // показываем загрузку, а не карточку «отчёта пока нет».
@@ -83,6 +154,128 @@ export function ReportView({
     () => (stored ? buildReport(stored, dict.quiz, analysis) : null),
     [stored, dict.quiz, analysis],
   );
+
+  /**
+   * Спрашиваем доступ у сервера.
+   *
+   * Сразу при открытии — чтобы уже оплаченный отчёт открывался сам, и ещё раз
+   * после возврата с оплаты, пока не придёт подтверждение.
+   */
+  useEffect(() => {
+    if (!ready || !stored) return;
+
+    // Запечатанной части нет: запрос на разбор не дошёл или запись от прошлой
+    // версии. Открывать нечего — статус «expired» считается ниже.
+    if (!sealed) return;
+
+    let cancelled = false;
+    const returned = returnedFromPayment();
+
+    void (async () => {
+      if (returned) setStatus("checking");
+
+      const attempts = returned ? RETURN_ATTEMPTS : 1;
+
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const next = await fetchAccess(sealed);
+        if (cancelled) return;
+
+        // Цену берём из ответа даже без оплаты: она задана на сервере.
+        setAccess(next);
+
+        if (next.paid) {
+          setStatus("idle");
+          setJustPaid(returned && next.locked !== null);
+          forgetPaymentQuery();
+
+          return;
+        }
+
+        if (attempt + 1 < attempts) {
+          await wait(RETURN_DELAY_MS);
+          if (cancelled) return;
+        }
+      }
+
+      if (returned) {
+        setStatus("pending");
+        forgetPaymentQuery();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, stored, sealed]);
+
+  const recheck = useCallback(async () => {
+    if (!sealed) return;
+
+    setStatus("checking");
+    const next = await fetchAccess(sealed);
+
+    setAccess(next);
+    setJustPaid(next.locked !== null);
+    setStatus(next.paid ? "idle" : "pending");
+  }, [sealed]);
+
+  const pay = useCallback(async () => {
+    if (!reportId || !sealed) {
+      setStatus("expired");
+
+      return;
+    }
+
+    setStatus("busy");
+    const result = await startPayment(reportId, locale);
+
+    if (result.kind === "redirect") {
+      // Уходим на страницу Finik: там QR-код и приложение банка.
+      window.location.href = result.url;
+
+      return;
+    }
+
+    if (result.kind === "paid") {
+      await recheck();
+
+      return;
+    }
+
+    // Оплату нельзя начать по вине сервера — это не «попробуйте ещё раз».
+    const blocked =
+      result.reason === "not-configured" || result.reason === "store-unavailable";
+
+    setStatus(blocked ? "unavailable" : "error");
+  }, [reportId, sealed, locale, recheck]);
+
+  /**
+   * Закрытая часть отчёта. null — доступ не оплачен, и блоки 4–10 рисуются
+   * заглушками. Ничего «спрятанного» в разметке при этом нет: данных для них
+   * на странице просто не существует.
+   */
+  const locked = access.locked;
+  const pw = t.paywall;
+
+  /**
+   * Открывать нечего в двух случаях: запечатанной части нет вовсе (запрос на
+   * разбор не дошёл, запись от прошлой версии) или она больше не открывается —
+   * это видно по «оплачено, а закрытой части нет». Второе важно не спутать с
+   * «не оплачено», иначе оплатившей паре снова показали бы кнопку оплаты.
+   *
+   * `ok: false` — сервер не смог проверить оплату; предлагать оплату в этот
+   * момент тоже нельзя, поэтому отдельный статус.
+   *
+   * Оба состояния вычисляемые, а не в state: иначе они зависели бы от порядка
+   * эффектов.
+   */
+  const paywallStatus: PaywallStatus = !sealed
+    ? "expired"
+    : !access.ok
+      ? "retry"
+      : access.paid && locked === null
+        ? "expired"
+        : status;
 
   /** Имя файла: «GreenFlag — отчёт Катя и Сергей.pdf». */
   function pdfFileName(): string {
@@ -297,190 +490,252 @@ export function ReportView({
           </div>
         </ReportBlock>
 
+        {/* Граница платного: дальше блоки рисуются только из того, что пришло
+            с сервера после подтверждённой оплаты. */}
+        {locked ? (
+          justPaid ? <PaidNote text={pw.done} /> : null
+        ) : (
+          <PaywallCard
+            texts={pw}
+            price={access.price}
+            status={paywallStatus}
+            onPay={() => void pay()}
+            onRecheck={() => void recheck()}
+          />
+        )}
+
         {/* 4. Вердикт: кто из двоих перегибает с контролем */}
-        <ReportBlock n={4} title={t.abuser.title}>
-          <div className="flex items-center justify-center gap-4 sm:gap-8">
-            <Avatar src="/woman.png" label={who.she} tone="she" />
-            <span className="font-display text-sm font-extrabold text-ink-muted sm:text-base">
-              VS
-            </span>
-            <Avatar src="/man.png" label={who.he} tone="he" />
-          </div>
+        {locked ? (
+          <ReportBlock n={4} title={t.abuser.title}>
+            <div className="flex items-center justify-center gap-4 sm:gap-8">
+              <Avatar src="/woman.png" label={who.she} tone="she" />
+              <span className="font-display text-sm font-extrabold text-ink-muted sm:text-base">
+                VS
+              </span>
+              <Avatar src="/man.png" label={who.he} tone="he" />
+            </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            <p className="text-[13px] font-bold sm:text-sm">{t.abuser.lead}</p>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-extrabold sm:text-sm",
-                report.abuser === "nobody"
-                  ? "bg-flag-green/10 text-flag-green"
-                  : "bg-flag-red/10 text-flag-red",
-              )}
-            >
-              <span aria-hidden>!</span>
-              {t.abuser.verdicts[report.abuser]}
-            </span>
-          </div>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <p className="text-[13px] font-bold sm:text-sm">{t.abuser.lead}</p>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-extrabold sm:text-sm",
+                  locked.abuser === "nobody"
+                    ? "bg-flag-green/10 text-flag-green"
+                    : "bg-flag-red/10 text-flag-red",
+                )}
+              >
+                <span aria-hidden>!</span>
+                {t.abuser.verdicts[locked.abuser]}
+              </span>
+            </div>
 
-          <p className="mt-3 rounded-2xl bg-canvas p-3 text-center text-[12px] leading-snug text-ink-soft sm:text-[13px]">
-            {report.abuserNote ?? t.abuser.notes[report.abuser]}
-          </p>
-        </ReportBlock>
+            <p className="mt-3 rounded-2xl bg-canvas p-3 text-center text-[12px] leading-snug text-ink-soft sm:text-[13px]">
+              {locked.abuserNote ?? t.abuser.notes[locked.abuser]}
+            </p>
+          </ReportBlock>
+        ) : (
+          <LockedBlock n={4} title={t.abuser.title} shape="faces" texts={pw} />
+        )}
 
         {/* 5. Баттл: перевес по каждому вопросу */}
-        <ReportBlock n={5} title={t.battle.title}>
-          {report.scale.rows.length === 0 && report.blitz.length === 0 ? (
-            <p className="text-xs text-ink-muted">{t.battle.empty}</p>
-          ) : (
-            <>
-              <div className="flex items-center justify-end gap-4">
-                <SideBadge src="/woman.png" label={who.she} tone="she" />
-                <SideBadge src="/man.png" label={who.he} tone="he" />
-              </div>
+        {locked ? (
+          <ReportBlock n={5} title={t.battle.title}>
+            {!locked.hasBattle ? (
+              <p className="text-xs text-ink-muted">{t.battle.empty}</p>
+            ) : (
+              <>
+                <div className="flex items-center justify-end gap-4">
+                  <SideBadge src="/woman.png" label={who.she} tone="she" />
+                  <SideBadge src="/man.png" label={who.he} tone="he" />
+                </div>
 
-              <ul className="mt-4 flex flex-col gap-4 sm:gap-5">
-                {report.battle.map((round) => (
-                  <BattleRow
-                    key={round.id}
-                    label={dict.battle.rounds[round.id]}
-                    value={round.value}
-                  />
-                ))}
-              </ul>
-            </>
-          )}
-        </ReportBlock>
+                <ul className="mt-4 flex flex-col gap-4 sm:gap-5">
+                  {locked.battle.map((round) => (
+                    <BattleRow
+                      key={round.id}
+                      label={dict.battle.rounds[round.id]}
+                      value={round.value}
+                    />
+                  ))}
+                </ul>
+              </>
+            )}
+          </ReportBlock>
+        ) : (
+          <LockedBlock n={5} title={t.battle.title} shape="rows" texts={pw} />
+        )}
 
         {/* 6. Флагометр: сколько грин и ред флагов набрал каждый */}
-        <ReportBlock n={6} title={t.flags.title} note={t.flags.lead}>
-          {report.flags.total.green + report.flags.total.red === 0 ? (
-            <p className="text-xs text-ink-muted">{t.flags.empty}</p>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                <FlagColumn
-                  src="/woman.png"
-                  name={who.she}
-                  tone="she"
-                  count={report.flags.she}
-                  greenLabel={t.flags.countGreen}
-                  redLabel={t.flags.countRed}
-                />
-                <FlagColumn
-                  src="/man.png"
-                  name={who.he}
-                  tone="he"
-                  count={report.flags.he}
-                  greenLabel={t.flags.countGreen}
-                  redLabel={t.flags.countRed}
-                />
-              </div>
+        {locked ? (
+          <ReportBlock n={6} title={t.flags.title} note={t.flags.lead}>
+            {locked.flags.total.green + locked.flags.total.red === 0 ? (
+              <p className="text-xs text-ink-muted">{t.flags.empty}</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <FlagColumn
+                    src="/woman.png"
+                    name={who.she}
+                    tone="she"
+                    count={locked.flags.she}
+                    greenLabel={t.flags.countGreen}
+                    redLabel={t.flags.countRed}
+                  />
+                  <FlagColumn
+                    src="/man.png"
+                    name={who.he}
+                    tone="he"
+                    count={locked.flags.he}
+                    greenLabel={t.flags.countGreen}
+                    redLabel={t.flags.countRed}
+                  />
+                </div>
 
-              <div className="mt-3 flex flex-col gap-2">
-                <Award
-                  label={t.flags.awardGreen}
-                  holder={report.flags.greenHolder}
-                  who={who}
-                  tie={t.flags.tie}
-                  tone="green"
-                />
-                <Award
-                  label={t.flags.awardRed}
-                  holder={report.flags.redHolder}
-                  who={who}
-                  tie={t.flags.tie}
-                  tone="red"
-                />
-              </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Award
+                    label={t.flags.awardGreen}
+                    holder={locked.flags.greenHolder}
+                    who={who}
+                    tie={t.flags.tie}
+                    tone="green"
+                  />
+                  <Award
+                    label={t.flags.awardRed}
+                    holder={locked.flags.redHolder}
+                    who={who}
+                    tie={t.flags.tie}
+                    tone="red"
+                  />
+                </div>
 
-              <p className="mt-3 text-center text-[11px] font-bold text-ink-muted sm:text-xs">
-                {t.flags.total
-                  .replace("{green}", String(report.flags.total.green))
-                  .replace("{red}", String(report.flags.total.red))}
-              </p>
-            </>
-          )}
-        </ReportBlock>
+                <p className="mt-3 text-center text-[11px] font-bold text-ink-muted sm:text-xs">
+                  {t.flags.total
+                    .replace("{green}", String(locked.flags.total.green))
+                    .replace("{red}", String(locked.flags.total.red))}
+                </p>
+              </>
+            )}
+          </ReportBlock>
+        ) : (
+          <LockedBlock
+            n={6}
+            title={t.flags.title}
+            shape="columns"
+            texts={pw}
+          />
+        )}
 
         {/* 7. Риски */}
-        <ReportBlock n={7} title={t.risks.title}>
-          <div className="grid grid-cols-2 gap-3">
-            <Donut
-              value={report.risks.fight}
-              tone={report.risks.fight >= 65 ? "bad" : report.risks.fight >= 40 ? "mid" : "good"}
-              label={t.risks.fight}
-              size={96}
-            />
-            <Donut
-              value={report.risks.breakup}
-              tone={report.risks.breakup >= 65 ? "bad" : report.risks.breakup >= 40 ? "mid" : "good"}
-              label={t.risks.breakup}
-              size={96}
-            />
-          </div>
-        </ReportBlock>
+        {locked ? (
+          <ReportBlock n={7} title={t.risks.title}>
+            <div className="grid grid-cols-2 gap-3">
+              <Donut
+                value={locked.risks.fight}
+                tone={toneOfRisk(locked.risks.fight)}
+                label={t.risks.fight}
+                size={96}
+              />
+              <Donut
+                value={locked.risks.breakup}
+                tone={toneOfRisk(locked.risks.breakup)}
+                label={t.risks.breakup}
+                size={96}
+              />
+            </div>
+          </ReportBlock>
+        ) : (
+          <LockedBlock n={7} title={t.risks.title} shape="donuts" texts={pw} />
+        )}
 
         {/* 8. Вероятность измены */}
-        <ReportBlock n={8} title={dict.report.blocks.cheating.title}>
-          <p
-            className={cn(
-              "font-display text-4xl leading-none font-extrabold",
-              TONE_TEXT[report.cheating.tone],
-            )}
-          >
-            {report.cheating.value}%
-          </p>
-
-          <div className="mt-3">
-            <Bar value={report.cheating.value} tone={report.cheating.tone} />
-          </div>
-
-          {report.cheating.note ? (
-            <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
-              {report.cheating.note}
+        {locked ? (
+          <ReportBlock n={8} title={dict.report.blocks.cheating.title}>
+            <p
+              className={cn(
+                "font-display text-4xl leading-none font-extrabold",
+                TONE_TEXT[locked.cheating.tone],
+              )}
+            >
+              {locked.cheating.value}%
             </p>
-          ) : null}
-        </ReportBlock>
+
+            <div className="mt-3">
+              <Bar value={locked.cheating.value} tone={locked.cheating.tone} />
+            </div>
+
+            {locked.cheating.note ? (
+              <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
+                {locked.cheating.note}
+              </p>
+            ) : null}
+          </ReportBlock>
+        ) : (
+          <LockedBlock
+            n={8}
+            title={dict.report.blocks.cheating.title}
+            shape="value"
+            texts={pw}
+          />
+        )}
 
         {/* 9. Идеи для свиданий. Их придумывает модель, поэтому без разбора
             блока нет: подставлять общие советы вместо разбора нечестно. */}
-        {report.dates.length > 0 ? (
-          <ReportBlock n={9} title={dict.report.blocks.dates.title}>
-            <ol className="flex flex-col gap-2">
-              {report.dates.map((idea, index) => (
-                <li
-                  key={index}
-                  className="flex items-start gap-2.5 rounded-2xl bg-canvas p-3"
-                >
-                  <span
-                    aria-hidden
-                    className="grid size-5 shrink-0 place-items-center rounded-full bg-pink-100 text-[10px] font-extrabold text-pink-600"
+        {locked ? (
+          locked.dates.length > 0 ? (
+            <ReportBlock n={9} title={dict.report.blocks.dates.title}>
+              <ol className="flex flex-col gap-2">
+                {locked.dates.map((idea, index) => (
+                  <li
+                    key={index}
+                    className="flex items-start gap-2.5 rounded-2xl bg-canvas p-3"
                   >
-                    {index + 1}
-                  </span>
-                  <p className="text-[12px] leading-snug sm:text-[13px]">
-                    {idea}
-                  </p>
-                </li>
-              ))}
-            </ol>
-          </ReportBlock>
-        ) : null}
+                    <span
+                      aria-hidden
+                      className="grid size-5 shrink-0 place-items-center rounded-full bg-pink-100 text-[10px] font-extrabold text-pink-600"
+                    >
+                      {index + 1}
+                    </span>
+                    <p className="text-[12px] leading-snug sm:text-[13px]">
+                      {idea}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </ReportBlock>
+          ) : null
+        ) : (
+          <LockedBlock
+            n={9}
+            title={dict.report.blocks.dates.title}
+            shape="list"
+            texts={pw}
+          />
+        )}
 
         {/* 10. Фильм, мем и мультфильм — тоже только с разбором. Номер
             подстраивается, чтобы в отчёте не было пропущенного. */}
-        {report.fun ? (
-          <ReportBlock
-            n={report.dates.length > 0 ? 10 : 9}
+        {locked ? (
+          locked.fun ? (
+            <ReportBlock
+              n={locked.dates.length > 0 ? 10 : 9}
+              title={dict.report.blocks.fun.title}
+            >
+              <div className="grid gap-2 sm:grid-cols-3">
+                <NoteCard label={t.fun.film} text={locked.fun.film} />
+                <NoteCard label={t.fun.meme} text={locked.fun.meme} />
+                <NoteCard label={t.fun.cartoon} text={locked.fun.cartoon} />
+              </div>
+            </ReportBlock>
+          ) : null
+        ) : (
+          <LockedBlock
+            n={10}
             title={dict.report.blocks.fun.title}
-          >
-            <div className="grid gap-2 sm:grid-cols-3">
-              <NoteCard label={t.fun.film} text={report.fun.film} />
-              <NoteCard label={t.fun.meme} text={report.fun.meme} />
-              <NoteCard label={t.fun.cartoon} text={report.fun.cartoon} />
-            </div>
-          </ReportBlock>
-        ) : null}
+            shape="list"
+            texts={pw}
+          />
+        )}
 
         {/* Единственный выход обратно в тест: со заполненными ответами
             страница теста сама возвращает в отчёт, поэтому пройти заново
