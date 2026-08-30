@@ -24,7 +24,7 @@ export const FREE_BLOCKS = 3;
 export const REPORT_PRICE = (() => {
   const parsed = Number(process.env.NEXT_PUBLIC_REPORT_PRICE);
 
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 199;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 10;
 })();
 
 export const REPORT_CURRENCY = "KGS";
